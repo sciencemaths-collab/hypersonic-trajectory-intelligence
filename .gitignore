@@ -1,0 +1,23 @@
+.DS_Store
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Streamlit and model outputs
+*_model_state.pt
+*_normalization.npz
+*_online_trace.npz
+*_online_heatmaps.png
+*_online_class_over_time.png
+*_online_confidence.png
+*_metrics.json
+stress_fast.json
+
+# Keep the versioned benchmark evidence.
+!benchmark_v64_maneuver_calibrated_metrics.json
+
