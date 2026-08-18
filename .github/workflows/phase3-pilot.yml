@@ -21,6 +21,21 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Post pilot start receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > phase3_pilot_started.md <<EOF
+          ## Phase 3 development pilot started
+
+          - source commit: `${GITHUB_SHA}`
+          - development seed: `17` (not a final-test seed)
+          - final seeds remain sealed: `101, 211, 307, 401, 503`
+          - workflow run: `${GITHUB_RUN_ID}`
+
+          This is a development-only coverage/sample-support check.
+          EOF
+          gh issue comment 3 --body-file phase3_pilot_started.md
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -54,9 +69,10 @@ jobs:
               f"- protocol SHA-256: `{report['protocol_sha256']}`",
               f"- execution-config SHA-256: `{report['execution_config_sha256']}`",
               f"- generated events: **{report['generated_events']}**",
-              f"- windows: **{report['samples']}**",
+              f"- jointly eligible windows: **{report['samples']}**",
+              f"- minimum shared source frame: **{report['minimum_joint_source_frame']}**",
               f"- sample gate: **{'PASS' if report['window_gate_pass'] else 'FAIL'}**",
-              f"- class-coverage gate: **{'PASS' if report['coverage_gate_pass'] else 'FAIL'}**",
+              f"- frozen test-class-coverage gate: **{'PASS' if report['coverage_gate_pass'] else 'FAIL'}**",
               f"- overall pilot gate: **{'PASS' if report['pilot_gate_pass'] else 'FAIL'}**",
               "",
               "### Class coverage by split/horizon",
@@ -70,10 +86,25 @@ jobs:
           Path("phase3_pilot_summary.md").write_text("\n".join(lines) + "\n")
           PY
       - name: Post pilot result to Phase 3 issue
-        if: always() && hashFiles('phase3_pilot_summary.md') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh issue comment 3 --body-file phase3_pilot_summary.md
+      - name: Post pilot failure receipt
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > phase3_pilot_failure.md <<EOF
+          ## Phase 3 development pilot workflow failure
+
+          - source commit: `${GITHUB_SHA}`
+          - development seed: `17` (not a final-test seed)
+          - workflow run: `${GITHUB_RUN_ID}`
+          - final-test seeds were not authorized by this run
+
+          The pilot workflow failed before producing a valid PASS receipt. The five frozen final seeds remain sealed.
+          EOF
+          gh issue comment 3 --body-file phase3_pilot_failure.md
       - name: Upload pilot evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -82,4 +113,6 @@ jobs:
           path: |
             hti08_phase3_pilot.json
             phase3_pilot_summary.md
-          if-no-files-found: error
+            phase3_pilot_started.md
+            phase3_pilot_failure.md
+          if-no-files-found: warn
