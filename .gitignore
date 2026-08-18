@@ -7,6 +7,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
 # Local Streamlit and model outputs
 *_model_state.pt
@@ -17,7 +19,7 @@ __pycache__/
 *_online_confidence.png
 *_metrics.json
 stress_fast.json
+evidence_report.json
 
 # Keep the versioned benchmark evidence.
 !benchmark_v64_maneuver_calibrated_metrics.json
-

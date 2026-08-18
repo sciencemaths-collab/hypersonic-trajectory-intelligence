@@ -1,15 +1,20 @@
 {
+  "provenance": {
+    "schema": "hti.recorded-benchmark.v1",
+    "source_commit": "84695844155c7ad461e2c3a86e8a9e492a533798",
+    "evidence_type": "single-seed synthetic benchmark",
+    "seed": 42,
+    "multi_seed_seeds": [42],
+    "external_validation": false,
+    "postprocessing_note": "Workstation-specific absolute artifact paths were replaced with portable basenames; numerical benchmark results were not changed."
+  },
   "config": {
     "dt": 0.05,
     "traj_steps": 200,
     "num_trajectories": 250,
     "offline_stride": 2,
     "window": 10,
-    "horizon_steps": [
-      8,
-      10,
-      12
-    ],
+    "horizon_steps": [8, 10, 12],
     "box_N": 4,
     "d_model": 96,
     "nlayers": 3,
@@ -26,38 +31,14 @@
     "trajectory_groups": 48.0,
     "split_by_trajectory": 1.0,
     "valid_labels_by_split": {
-      "train": [
-        2904,
-        2871,
-        2838
-      ],
-      "validation": [
-        616,
-        609,
-        602
-      ],
-      "test": [
-        704,
-        696,
-        688
-      ]
+      "train": [2904, 2871, 2838],
+      "validation": [616, 609, 602],
+      "test": [704, 696, 688]
     },
     "unique_classes_by_split": {
-      "train": [
-        11,
-        8,
-        5
-      ],
-      "validation": [
-        4,
-        4,
-        4
-      ],
-      "test": [
-        4,
-        4,
-        4
-      ]
+      "train": [11, 8, 5],
+      "validation": [4, 4, 4],
+      "test": [4, 4, 4]
     }
   },
   "train": {
@@ -68,38 +49,14 @@
     "trajectory_groups": 48.0,
     "split_by_trajectory": 1.0,
     "valid_labels_by_split": {
-      "train": [
-        2904,
-        2871,
-        2838
-      ],
-      "validation": [
-        616,
-        609,
-        602
-      ],
-      "test": [
-        704,
-        696,
-        688
-      ]
+      "train": [2904, 2871, 2838],
+      "validation": [616, 609, 602],
+      "test": [704, 696, 688]
     },
     "unique_classes_by_split": {
-      "train": [
-        11,
-        8,
-        5
-      ],
-      "validation": [
-        4,
-        4,
-        4
-      ],
-      "test": [
-        4,
-        4,
-        4
-      ]
+      "train": [11, 8, 5],
+      "validation": [4, 4, 4],
+      "test": [4, 4, 4]
     },
     "best_val_loss": 2.053772009812392,
     "epochs": 18,
@@ -137,17 +94,31 @@
     }
   },
   "online": {
-    "online_heatmaps_png": "/private/tmp/trajectory_v64_maneuver_guarded_full_2/run_online_heatmaps.png",
-    "online_class_png": "/private/tmp/trajectory_v64_maneuver_guarded_full_2/run_online_class_over_time.png",
-    "online_conf_png": "/private/tmp/trajectory_v64_maneuver_guarded_full_2/run_online_confidence.png",
-    "online_trace_npz": "/private/tmp/trajectory_v64_maneuver_guarded_full_2/run_online_trace.npz",
+    "online_heatmaps_png": "run_online_heatmaps.png",
+    "online_class_png": "run_online_class_over_time.png",
+    "online_conf_png": "run_online_confidence.png",
+    "online_trace_npz": "run_online_trace.npz",
     "online_html": "",
     "online_gate_total": "201",
     "online_gate_rejections": "0"
   },
   "artifacts": {
-    "model_state": "/private/tmp/trajectory_v64_maneuver_guarded_full_2/run_model_state.pt",
-    "normalization": "/private/tmp/trajectory_v64_maneuver_guarded_full_2/run_normalization.npz",
+    "model_state": "run_model_state.pt",
+    "normalization": "run_normalization.npz",
     "load_note": "Load model_state with torch.load(..., weights_only=True)."
+  },
+  "readiness_audit": {
+    "class_coverage_fraction": {
+      "train": [0.6875, 0.5, 0.3125],
+      "validation": [0.25, 0.25, 0.25],
+      "test": [0.25, 0.25, 0.25]
+    },
+    "known_release_failures": [
+      "0.6-second accuracy does not exceed the recorded majority baseline",
+      "0.6-second ECE exceeds 10 percent",
+      "validation and test class coverage is 4 of 16 classes at all horizons",
+      "evidence is single-seed and synthetic only",
+      "no independent external validation is recorded"
+    ]
   }
 }
