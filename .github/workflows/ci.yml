@@ -35,12 +35,12 @@ jobs:
         run: >-
           python -m compileall -q hti scripts
           test_v63.py test_assurance.py test_topological_entropy.py
-          test_fusion_benchmarking.py
+          test_fusion_benchmarking.py test_phase3.py
       - name: Unit verification
         run: >-
           python -m unittest -v
           test_v63.py test_assurance.py test_topological_entropy.py
-          test_fusion_benchmarking.py
+          test_fusion_benchmarking.py test_phase3.py
       - name: HTI 0.8 benchmark harness smoke
         run: >-
           python scripts/hti_08_evaluate_predictions.py
@@ -48,6 +48,8 @@ jobs:
           --report hti08_ablation_smoke_report.json
       - name: Structural CLI import smoke
         run: python scripts/hti_structural_analysis.py --help > /dev/null
+      - name: Phase 3 pilot CLI import smoke
+        run: python scripts/hti_08_phase3_pilot.py --help > /dev/null
       - name: Evidence integrity gate
         run: >-
           python scripts/evidence_gate.py
@@ -61,7 +63,7 @@ jobs:
       - name: Lint research modules
         run: >-
           ruff check hti scripts
-          test_assurance.py test_topological_entropy.py test_fusion_benchmarking.py
+          test_assurance.py test_topological_entropy.py test_fusion_benchmarking.py test_phase3.py
       - name: Dependency audit
         run: pip-audit -r requirements.txt
       - name: Upload evidence bundle
