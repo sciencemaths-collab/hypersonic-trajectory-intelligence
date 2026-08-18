@@ -46,6 +46,8 @@ jobs:
           python scripts/hti_08_evaluate_predictions.py
           --self-test
           --report hti08_ablation_smoke_report.json
+      - name: Structural CLI import smoke
+        run: python scripts/hti_structural_analysis.py --help > /dev/null
       - name: Evidence integrity gate
         run: >-
           python scripts/evidence_gate.py
