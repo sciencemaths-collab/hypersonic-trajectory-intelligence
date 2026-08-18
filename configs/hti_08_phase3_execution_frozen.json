@@ -1,11 +1,13 @@
 {
   "schema": "hti.phase3-execution.v0.8",
   "status": "frozen-before-final-test",
+  "development_revision": 2,
+  "development_change_rationale": "Development seed 17 at revision 1 produced 7/16 classes at the 0.6 s test horizon, below the predeclared 50% class-coverage gate. No final-test seed was inspected. Revision 2 changes only complete-event count/sample support; motion, grid, model, fusion, topology, calibration, and claim gates are unchanged.",
   "protocol": "configs/hti_08_ablation_frozen.json",
   "scope": "synthetic non-sensitive civil aerospace internal validation",
   "trajectory_generation": {
-    "target_event_groups": 72,
-    "minimum_windows": 3200,
+    "target_event_groups": 96,
+    "minimum_windows": 7000,
     "traj_steps": 180,
     "offline_stride": 2,
     "window": 10,
