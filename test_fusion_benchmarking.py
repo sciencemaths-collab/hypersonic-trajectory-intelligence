@@ -28,14 +28,17 @@ class FusionBenchmarkingTests(unittest.TestCase):
     def frozen_execution(self):
         return json.loads(self.execution_path.read_text(encoding="utf-8"))
 
+    def protocol_sha256(self):
+        return hashlib.sha256(self.protocol_path.read_bytes()).hexdigest()
+
     def execution_sha256(self):
         return hashlib.sha256(self.execution_path.read_bytes()).hexdigest()
 
     def self_test_bundle(self):
-        execution = self.frozen_execution()
         return _self_test_bundle(
+            protocol_sha256=self.protocol_sha256(),
             execution_config_sha256=self.execution_sha256(),
-            topology_strength=float(execution["topology_branch"]["cell_prior_strength"]),
+            execution=self.frozen_execution(),
         )
 
     def evaluate_bundle(self, bundle):
@@ -43,6 +46,7 @@ class FusionBenchmarkingTests(unittest.TestCase):
             bundle,
             self.frozen_config(),
             self.frozen_execution(),
+            protocol_sha256=self.protocol_sha256(),
             execution_config_sha256=self.execution_sha256(),
         )
 
@@ -159,9 +163,16 @@ class FusionBenchmarkingTests(unittest.TestCase):
     def test_self_test_bundle_satisfies_full_composition_contract(self):
         report = self.evaluate_bundle(self.self_test_bundle())
         contract = report["contract"]
+        self.assertTrue(contract["core_fusion_reproducible"])
         self.assertTrue(contract["structural_fusion_reproducible"])
         self.assertTrue(contract["topology_application_reproducible"])
         self.assertTrue(contract["combined_reproducible"])
+
+    def test_frozen_evaluator_rejects_unreproducible_core_fusion(self):
+        bundle = self.self_test_bundle()
+        bundle["probs__core_hti"] = bundle["core_transformer_probabilities"].copy()
+        with self.assertRaisesRegex(ValueError, "core_hti"):
+            self.evaluate_bundle(bundle)
 
     def test_frozen_evaluator_rejects_missing_variant(self):
         bundle = self.self_test_bundle()
@@ -209,6 +220,12 @@ class FusionBenchmarkingTests(unittest.TestCase):
         bundle = self.self_test_bundle()
         del bundle["topology_coefficients_sha256"]
         with self.assertRaisesRegex(ValueError, "topology_coefficients_sha256"):
+            self.evaluate_bundle(bundle)
+
+    def test_frozen_evaluator_rejects_wrong_protocol_digest(self):
+        bundle = self.self_test_bundle()
+        bundle["protocol_sha256"] = np.array(["0" * 64])
+        with self.assertRaisesRegex(ValueError, "protocol_sha256"):
             self.evaluate_bundle(bundle)
 
     def test_frozen_evaluator_rejects_wrong_execution_config_digest(self):
