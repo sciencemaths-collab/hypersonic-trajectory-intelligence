@@ -6,7 +6,7 @@ Phase 2 turns the 0.8 structural/topological architecture into a controlled comp
 
 ## Why this phase is separate
 
-The core predictor already has a validated engineering path. Injecting new structural dimensions directly into the UKF or Transformer before proving value would make it difficult to determine whether a change helped, hurt, or merely increased complexity.
+The core predictor already has a verified engineering path. Injecting new structural dimensions directly into the UKF or Transformer before proving value would make it difficult to determine whether a change helped, hurt, or merely increased complexity.
 
 Phase 2 therefore keeps four surfaces separate:
 
@@ -47,24 +47,31 @@ A topology/cell prior can be applied independently with `apply_cell_prior`, agai
 
 The evaluator accepts a NumPy `.npz` file loaded with `allow_pickle=False`.
 
-Required arrays:
+Required arrays/fields for a final frozen bundle are:
 
 ```text
-labels                 shape (samples, horizons) or (samples,)
-event_ids              shape (samples,)
-probs__<variant>       shape (samples, horizons, classes) or (samples, classes)
+labels                         shape (samples, horizons) or (samples,)
+event_ids                      shape (samples,)
+seed                           scalar frozen seed
+train_event_ids                complete-event training manifest
+validation_event_ids           complete-event validation manifest
+test_event_ids                 complete-event test manifest
+orientation_source             scalar Unicode provenance label
+probs__<variant>               shape (samples, horizons, classes) or (samples, classes)
+topology_true_path_suppressed  shape matching labels when required by topology policy
 ```
 
-Examples:
+The evaluator rejects overlapping train/validation/test event identities. The unique `event_ids` attached to the prediction rows must exactly equal the declared test-event set.
+
+All variants listed in the frozen protocol must be present in a final bundle and must use the same samples, labels, horizon definitions, event identities, and cell partition.
+
+Optional pre-calibrated conformal thresholds may be supplied as:
 
 ```text
-probs__core_hti
-probs__core_plus_structural
-probs__core_plus_topology
-probs__hti_08_combined
+conformal_qhat__<variant>      scalar or one value per horizon
 ```
 
-All variants compared in one report must use the same samples, labels, horizon definitions, event identities, and cell partition.
+These thresholds are **evaluated only**. The evaluator never fits them on final-test labels.
 
 ## Evaluation
 
@@ -84,16 +91,24 @@ The report contains, per variant and horizon:
 - negative log likelihood;
 - multiclass Brier score;
 - top-label ECE;
-- 95% Bayesian credible-region coverage and mean size;
+- reliability-bin boundaries, counts, mean confidence, and empirical accuracy;
+- 95% Bayesian credible-region coverage, mean size, and median size;
 - mean confidence;
-- mean entropy concentration; and
-- selective risk at increasing retained-forecast coverage.
+- mean entropy concentration;
+- selective risk at increasing retained-forecast coverage; and
+- conformal coverage plus mean/median set size when a frozen `qhat` is supplied.
 
-When both `core_hti` and `hti_08_combined` are present, the evaluator also reports a paired **trajectory-event bootstrap** interval for NLL change. The bootstrap samples complete event identities, not adjacent windows.
+When both `core_hti` and `hti_08_combined` are present, the evaluator also reports a paired **trajectory-event bootstrap** interval for NLL change. The bootstrap samples complete event identities, retaining all windows for a sampled event.
+
+When `core_hti` and `core_plus_topology` are present, it reports the probability mass changed using total-variation distance and the change in true-cell support. If path-level suppression flags are supplied, it also reports their count and fraction. Path-level evidence is not fabricated from cell probabilities.
+
+The report records the SHA-256 of both the frozen protocol and the prediction bundle, along with the exact source checkout used to execute the evaluator.
 
 ## CI smoke test
 
-Research CI executes the evaluator on a deterministic synthetic probability bundle. The smoke test verifies the evaluation machinery, schema handling, metrics, and report generation. It is **not** scientific performance evidence for HTI 0.8.
+Research CI executes the evaluator on a deterministic synthetic probability bundle containing all eight protocol variants, disjoint event manifests, conformal thresholds, orientation provenance, and topology-suppression evidence. The smoke test verifies the evaluation machinery, schema handling, metrics, contract enforcement, and report generation. It is **not** scientific performance evidence for HTI 0.8.
+
+CI also executes the structural-analysis CLI directly. This catches packaging/import failures that ordinary module tests would miss.
 
 ## Required final interpretation
 
@@ -104,7 +119,10 @@ A favorable 0.8 result requires more than higher top-1 accuracy. At a claimed ho
 - no unacceptable calibration regression;
 - credible-region coverage consistent with its nominal level;
 - event-level uncertainty intervals;
-- transparent structural/topology ablations; and
+- transparent structural/topology ablations;
+- conformal coverage when conformal thresholds were calibrated;
+- explicit topology failure evidence;
+- explicit orientation provenance; and
 - no use of final-test data for fusion, topology, calibration, or assurance tuning.
 
 External/domain validation is still required before an external-readiness claim.
