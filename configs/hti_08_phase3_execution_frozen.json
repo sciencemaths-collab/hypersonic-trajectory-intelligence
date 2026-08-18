@@ -49,7 +49,8 @@
     "temperature_selection": "validation_only"
   },
   "transformer": {
-    "role": "core_hti",
+    "role": "core_transformer_branch",
+    "input": "existing_causal_ukf_physics_feature_control_tokens",
     "epochs": 10,
     "batch_size": 128,
     "d_model": 80,
@@ -62,6 +63,15 @@
     "label_smoothing": 0.05,
     "normalization": "train_split_only",
     "temperature_selection": "validation_only"
+  },
+  "core_fusion": {
+    "kind": "validation_selected_log_pool",
+    "first_branch": "core_transformer_branch",
+    "second_branch": "physics_only",
+    "candidate_weights_from_protocol": true,
+    "selection_data": "validation_only",
+    "selection_metric": "negative_log_likelihood",
+    "second_branch_weight_name": "core_physics_weights"
   },
   "structural_branch": {
     "kind": "ridge_multiclass_two_point_structure",
@@ -89,20 +99,20 @@
     "temperature_selection": "validation_only"
   },
   "topology_branch": {
-    "kind": "history_consistency_sigma_path_reweighting",
+    "kind": "history_consistency_sigma_and_maneuver_path_reweighting",
     "history_direction_source": "two_point_structural_travel_direction",
     "path_distance": "normalized_angle_between_history_direction_and_candidate_net_displacement_divided_by_pi",
     "history_angle_gamma": 1.5,
     "cell_prior_strength": 0.35,
     "cell_prior_floor": 0.001,
     "true_support_suppression_delta": 0.02,
-    "true_path_failure_definition": "one_minus_history_consistency_weight_exceeds_true_support_suppression_delta"
+    "true_path_failure_definition": "true_cell_probability_after_topology_is_lower_than_core_true_cell_probability_by_more_than_true_support_suppression_delta"
   },
   "fusion": {
     "candidate_weights_from_protocol": true,
     "selection_data": "validation_only",
     "selection_metric": "negative_log_likelihood",
-    "composition_order": "core_plus_raw_structural_then_frozen_topology_prior"
+    "composition_order": "core_hti_plus_raw_structural_then_frozen_topology_prior"
   },
   "conformal": {
     "alpha": 0.05,
