@@ -3,9 +3,9 @@
 from .assurance import (
     AssuranceDecision,
     assess_prediction,
+    confidence_margin,
     conformal_prediction_set,
     conformal_quantile,
-    confidence_margin,
     empirical_set_coverage,
     normalized_entropy,
 )

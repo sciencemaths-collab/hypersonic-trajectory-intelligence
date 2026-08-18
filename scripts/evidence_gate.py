@@ -16,7 +16,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
 
 

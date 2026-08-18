@@ -13,7 +13,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 DEFAULT_FILES = (
     "alien_exit_cell_predictor_v6_3.py",
     "streamlit_app.py",
