@@ -20,8 +20,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from hti.benchmarking import (  # noqa: E402
-    event_bootstrap_delta,
     evaluate_probabilities,
+    event_bootstrap_delta,
     nll_contributions,
     selective_risk_curve,
 )
