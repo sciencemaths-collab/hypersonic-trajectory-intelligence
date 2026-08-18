@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run a development-only event-coverage pilot before the five final HTI 0.8 seeds.
+"""Run a development-only coverage pilot before the five final HTI 0.8 seeds.
 
-The pilot seed must not be one of the frozen final-test seeds. It generates
-complete synthetic events, preserves event identity, and reports label/class
-coverage without training models or inspecting any final-seed result.
+The pilot seed must not be one of the frozen final-test seeds. It uses the
+candidate Phase 3 execution configuration to test event and class support
+without training models or inspecting any final-seed result.
 """
 
 from __future__ import annotations
@@ -50,34 +50,58 @@ def _source_commit() -> str:
         return "unknown"
 
 
+def _configure(
+    protocol: dict[str, object], execution: dict[str, object], seed: int
+) -> tuple[Config, int, int]:
+    generation = execution["trajectory_generation"]
+    cfg = Config()
+    cfg.seed = int(seed)
+    cfg.gpu = False
+    cfg.no_viz = True
+    cfg.traj_steps = int(generation["traj_steps"])
+    cfg.offline_stride = max(1, int(generation["offline_stride"]))
+    cfg.window = int(generation["window"])
+    cfg.maneuver_prob = float(generation["maneuver_prob"])
+    cfg.force_std = float(generation["force_std_n"])
+    cfg.torque_std = float(generation["torque_std_nm"])
+    cfg.max_mach = float(generation["max_mach"])
+    cfg.box_cross_scale = float(generation["box_cross_scale"])
+    cfg.box_cross_min_m = float(generation["box_cross_min_m"])
+    cfg.box_cross_max_m = float(generation["box_cross_max_m"])
+    cfg.horizon_steps = tuple(
+        int(round(float(horizon) / cfg.dt)) for horizon in protocol["horizons_seconds"]
+    )
+    return (
+        cfg,
+        int(generation["target_event_groups"]),
+        int(generation["minimum_windows"]),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=17)
-    parser.add_argument("--events", type=int, default=80)
-    parser.add_argument("--traj-steps", type=int, default=200)
-    parser.add_argument("--stride", type=int, default=2)
     parser.add_argument(
         "--protocol", type=Path, default=Path("configs/hti_08_ablation_frozen.json")
+    )
+    parser.add_argument(
+        "--execution-config",
+        type=Path,
+        default=Path("configs/hti_08_phase3_execution_frozen.json"),
     )
     parser.add_argument("--out", type=Path, default=Path("hti08_phase3_pilot.json"))
     args = parser.parse_args()
 
     protocol = json.loads(args.protocol.read_text(encoding="utf-8"))
+    execution = json.loads(args.execution_config.read_text(encoding="utf-8"))
     frozen_seeds = {int(value) for value in protocol["seeds"]}
     if int(args.seed) in frozen_seeds:
         raise SystemExit("development pilot must not use a frozen final-test seed")
 
-    cfg = Config()
-    cfg.seed = int(args.seed)
-    cfg.gpu = False
-    cfg.no_viz = True
-    cfg.traj_steps = int(args.traj_steps)
-    cfg.offline_stride = max(1, int(args.stride))
-    cfg.horizon_steps = tuple(int(round(float(h) / cfg.dt)) for h in protocol["horizons_seconds"])
-
+    cfg, event_target, minimum_windows = _configure(protocol, execution, int(args.seed))
     events, generation = generate_phase3_events(
         cfg,
-        event_target=int(args.events),
+        event_target=event_target,
         seed=int(args.seed),
     )
     split_cfg = protocol["split_policy"]
@@ -90,18 +114,32 @@ def main() -> int:
     )
     coverage = coverage_report(events, splits, num_classes=cfg.box_N * cfg.box_N)
     sample_counts = np.asarray([len(event.tokens) for event in events], dtype=int)
+    minimum_coverage = float(protocol["claim_gates"]["minimum_test_class_coverage"])
+    coverage_values = [
+        float(value)
+        for split in coverage.values()
+        for value in split["class_coverage"]
+    ]
+    coverage_gate_pass = bool(min(coverage_values) >= minimum_coverage)
+    window_gate_pass = bool(generation.samples >= minimum_windows)
 
     report = {
-        "schema": "hti.phase3-development-pilot.v1",
+        "schema": "hti.phase3-development-pilot.v2",
         "development_only": True,
         "final_test_seed_used": False,
         "source_commit": _source_commit(),
         "protocol_sha256": _sha256_file(args.protocol),
+        "execution_config_sha256": _sha256_file(args.execution_config),
         "seed": int(args.seed),
-        "requested_events": int(args.events),
+        "requested_events": int(event_target),
         "generated_events": int(generation.generated_events),
         "generation_attempts": int(generation.attempts),
         "samples": int(generation.samples),
+        "minimum_windows": int(minimum_windows),
+        "window_gate_pass": window_gate_pass,
+        "minimum_class_coverage": minimum_coverage,
+        "coverage_gate_pass": coverage_gate_pass,
+        "pilot_gate_pass": bool(coverage_gate_pass and window_gate_pass),
         "samples_per_event": {
             "min": int(sample_counts.min()),
             "median": float(np.median(sample_counts)),
@@ -123,6 +161,8 @@ def main() -> int:
             "box_cross_max_m": float(cfg.box_cross_max_m),
             "maneuver_probability": float(cfg.maneuver_prob),
             "force_std_N": float(cfg.force_std),
+            "torque_std_Nm": float(cfg.torque_std),
+            "max_mach": float(cfg.max_mach),
         },
         "split_event_ids": {
             name: [int(value) for value in ids] for name, ids in splits.items()
