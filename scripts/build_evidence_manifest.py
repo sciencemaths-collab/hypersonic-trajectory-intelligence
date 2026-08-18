@@ -16,8 +16,14 @@ from pathlib import Path
 DEFAULT_FILES = (
     "alien_exit_cell_predictor_v6_3.py",
     "streamlit_app.py",
+    "hti/assurance.py",
+    "hti/topological_entropy.py",
+    "test_assurance.py",
+    "test_topological_entropy.py",
     "requirements.txt",
     "benchmark_v64_maneuver_calibrated_metrics.json",
+    "docs/HTI_0_8_ARCHITECTURE.md",
+    "docs/TOPOLOGICAL_ENTROPY_VALIDATION.md",
 )
 
 
