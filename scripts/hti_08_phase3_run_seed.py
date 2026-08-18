@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Execute one frozen HTI 0.8 Phase 3 synthetic ablation seed.
 
-This runner trains/fits only on the complete-event train and validation splits.
-It writes an immutable final-test probability bundle for the separate evaluator.
-No final-test metric is used to select model, fusion, topology, temperature, or
-conformal parameters.
+Training and parameter selection use only complete-event train and validation
+splits. The resulting immutable final-test probability bundle is evaluated by a
+separate script. Final-test metrics never select model, fusion, topology,
+temperature, or conformal parameters.
 """
 
 from __future__ import annotations
@@ -57,6 +57,7 @@ from hti.phase3_models import (  # noqa: E402
     structural_feature_vector,
 )
 from hti.topological_entropy import (  # noqa: E402
+    StructuralMotionFeatures,
     endpoint_observations_from_centerline,
     estimate_structural_motion,
 )
@@ -174,13 +175,10 @@ def _normalize_training_arrays(
     def norm_tokens(values: np.ndarray) -> np.ndarray:
         return ((values - mean[None, None, :]) / scale[None, None, :]).astype(np.float32)
 
-    normalized_train = norm_tokens(x_train)
-    normalized_other = [norm_tokens(values) for values in other_tokens]
-    normalized_next_train = ((next_train - next_mean) / next_scale).astype(np.float32)
     return (
-        normalized_train,
-        normalized_next_train,
-        normalized_other,
+        norm_tokens(x_train),
+        ((next_train - next_mean) / next_scale).astype(np.float32),
+        [norm_tokens(values) for values in other_tokens],
         mean,
         scale,
         next_mean,
@@ -225,14 +223,14 @@ def _cell_index(box: VirtualBox | None, point: np.ndarray, box_n: int) -> int | 
     return int(cell[0] * box_n + cell[1])
 
 
-def _structural_vector(
+def _structural_motion_at(
     event: Phase3Event,
     frame: int,
     *,
     dt: float,
     history_points: int,
     body_length: float,
-) -> np.ndarray:
+) -> StructuralMotionFeatures:
     start = max(0, int(frame) - int(history_points) + 1)
     indices = np.arange(start, int(frame) + 1, dtype=int)
     if len(indices) < 3:
@@ -241,13 +239,30 @@ def _structural_vector(
     centers = states[:, :3]
     directions = np.asarray([q_to_R(state[6:10])[:, 0] for state in states])
     times = indices.astype(float) * float(dt)
-    observations = endpoint_observations_from_centerline(
-        times,
-        centers,
-        directions,
-        float(body_length),
-    )
-    return structural_feature_vector(estimate_structural_motion(observations))
+    observations = endpoint_observations_from_centerline(times, centers, directions, body_length)
+    return estimate_structural_motion(observations)
+
+
+def _structural_matrix(
+    events: list[Phase3Event], cfg: Config, execution: dict[str, object]
+) -> tuple[np.ndarray, np.ndarray]:
+    structural_cfg = execution["structural_branch"]
+    history_points = int(structural_cfg["history_points"])
+    body_length = float(structural_cfg["body_length_m"])
+    rows: list[np.ndarray] = []
+    event_rows: list[int] = []
+    for event in events:
+        for frame in event.source_frames:
+            motion = _structural_motion_at(
+                event,
+                int(frame),
+                dt=cfg.dt,
+                history_points=history_points,
+                body_length=body_length,
+            )
+            rows.append(structural_feature_vector(motion))
+            event_rows.append(int(event.event_id))
+    return np.stack(rows), np.asarray(event_rows, dtype=np.int64)
 
 
 def _handcrafted_split(
@@ -284,32 +299,33 @@ def _handcrafted_split(
     event_id_rows: list[int] = []
 
     for event in events:
-        for sample_index, frame in enumerate(event.source_frames):
-            state = event.estimated_states[int(frame)]
+        for frame in event.source_frames:
+            frame_index = int(frame)
+            state = event.estimated_states[frame_index]
             box = _reference_box(cfg, state)
-            measurement = event.measurements[int(frame)]
+            measurement = event.measurements[frame_index]
             u_current = (
-                event.controls[int(frame)].copy()
-                if int(frame) < len(event.controls)
+                event.controls[frame_index].copy()
+                if frame_index < len(event.controls)
                 else np.zeros(6, dtype=float)
             )
             sigma_paths, sigma_weights = project_sigma_horizons(
                 projectile,
                 state,
-                event.covariances[int(frame)],
+                event.covariances[frame_index],
                 u_current,
                 cfg.dt,
                 projection_env,
                 max_horizon,
             )
-            structural = _structural_vector(
+            motion = _structural_motion_at(
                 event,
-                int(frame),
+                frame_index,
                 dt=cfg.dt,
                 history_points=history_points,
                 body_length=body_length,
             )
-            structural_rows.append(structural)
+            structural_rows.append(structural_feature_vector(motion))
             event_id_rows.append(int(event.event_id))
 
             constant_h = []
@@ -334,7 +350,6 @@ def _handcrafted_split(
                         smoothing=smoothing,
                     )
                 )
-
                 cells = np.asarray(
                     [
                         -1
@@ -352,18 +367,11 @@ def _handcrafted_split(
                         smoothing=smoothing,
                     )
                 )
-                travel_direction = structural[0:1]
-                del travel_direction
-                history_start = max(0, int(frame) - history_points + 1)
-                recent_states = event.estimated_states[history_start : int(frame) + 1]
-                recent_direction = recent_states[-1, 3:6]
-                if np.linalg.norm(recent_direction) <= 1e-12:
-                    recent_direction = state[3:6]
                 topology_weights = history_consistency_weights(
                     sigma_weights,
                     sigma_paths[:, : horizon + 1, :3],
                     origin=state[:3],
-                    travel_direction=recent_direction,
+                    travel_direction=motion.travel_direction,
                     gamma=gamma,
                 )
                 topology_h.append(
@@ -391,6 +399,15 @@ def _handcrafted_split(
     )
 
 
+def _classifier_sha256(classifier: RidgeProbabilisticClassifier) -> str:
+    return _sha256_arrays(
+        classifier.mean,
+        classifier.scale,
+        classifier.coefficients,
+        prefix=f"ridge:{classifier.classes}:{classifier.ridge_lambda}",
+    )
+
+
 def _fit_structural_branch(
     train_features: np.ndarray,
     train_labels: np.ndarray,
@@ -401,11 +418,12 @@ def _fit_structural_branch(
     classes: int,
     ridge_lambda: float,
     temperature_candidates: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, list[dict[str, float]]]:
+) -> tuple[np.ndarray, np.ndarray, list[dict[str, object]], str]:
     horizons = train_labels.shape[1]
     validation_probabilities = np.empty((len(validation_features), horizons, classes), dtype=float)
     test_probabilities = np.empty((len(test_features), horizons, classes), dtype=float)
-    selections = []
+    selections: list[dict[str, object]] = []
+    model_digests = []
     for horizon in range(horizons):
         train_mask = train_labels[:, horizon] >= 0
         validation_mask = validation_labels[:, horizon] >= 0
@@ -415,6 +433,7 @@ def _fit_structural_branch(
             classes=classes,
             ridge_lambda=ridge_lambda,
         )
+        model_digest = _classifier_sha256(classifier)
         temperature, validation_nll = select_temperature(
             classifier,
             validation_features[validation_mask],
@@ -427,14 +446,21 @@ def _fit_structural_branch(
         test_probabilities[:, horizon, :] = classifier.probabilities(
             test_features, temperature=temperature
         )
+        model_digests.append(model_digest)
         selections.append(
             {
                 "horizon_index": int(horizon),
                 "temperature": float(temperature),
                 "validation_nll": float(validation_nll),
+                "classifier_sha256": model_digest,
             }
         )
-    return validation_probabilities, test_probabilities, selections
+    return (
+        validation_probabilities,
+        test_probabilities,
+        selections,
+        _sha256_json(model_digests),
+    )
 
 
 def _select_pool(
@@ -470,6 +496,23 @@ def _select_pool(
         weights.append(float(selection.structural_weight))
         nlls.append(float(selection.validation_nll))
     return validation_output, test_output, weights, nlls
+
+
+def _apply_topology_cube(
+    probabilities: np.ndarray,
+    topology_prior: np.ndarray,
+    *,
+    strength: float,
+    floor: float,
+) -> np.ndarray:
+    output = np.empty_like(probabilities)
+    for horizon in range(probabilities.shape[1]):
+        output[:, horizon, :] = apply_cell_prior(
+            probabilities[:, horizon, :],
+            np.maximum(topology_prior[:, horizon, :], float(floor)),
+            strength=float(strength),
+        )
+    return output
 
 
 def _conformal_parameters(
@@ -517,6 +560,7 @@ def main() -> int:
     )
     parser.add_argument("--out", type=Path)
     parser.add_argument("--selection-out", type=Path)
+    parser.add_argument("--model-out", type=Path)
     args = parser.parse_args()
 
     protocol = json.loads(args.protocol.read_text(encoding="utf-8"))
@@ -528,8 +572,10 @@ def main() -> int:
 
     output = args.out or Path(f"hti08_ablation_{seed}.npz")
     selection_output = args.selection_out or Path(f"hti08_selection_{seed}.json")
+    model_output = args.model_out or Path(f"hti08_learned_model_{seed}.pt")
     cfg = _configure(protocol, execution, seed)
     seed_everything(seed)
+
     generation_cfg = execution["trajectory_generation"]
     events, generation = generate_phase3_events(
         cfg,
@@ -551,7 +597,7 @@ def main() -> int:
     x_validation, y_validation, nf_validation, validation_sample_events = _join_events(
         validation_events
     )
-    x_test, y_test, nf_test, test_sample_events = _join_events(test_events)
+    x_test, y_test, _, test_sample_events = _join_events(test_events)
 
     (
         x_train_n,
@@ -589,21 +635,31 @@ def main() -> int:
         model, device, x_validation_n, learned_temperatures
     )
     learned_test = _learned_probabilities(model, device, x_test_n, learned_temperatures)
+    torch.save(model.state_dict(), model_output)
+    learned_model_sha256 = _sha256_file(model_output)
 
+    train_structural, train_structural_events = _structural_matrix(train_events, cfg, execution)
     validation_handcrafted, validation_structural, validation_handcrafted_events = _handcrafted_split(
         validation_events, cfg, execution
     )
     test_handcrafted, test_structural, test_handcrafted_events = _handcrafted_split(
         test_events, cfg, execution
     )
+    if not np.array_equal(train_structural_events, train_sample_events):
+        raise RuntimeError("train structural sample order differs from Transformer order")
     if not np.array_equal(validation_handcrafted_events, validation_sample_events):
         raise RuntimeError("validation handcrafted sample order differs from Transformer order")
     if not np.array_equal(test_handcrafted_events, test_sample_events):
         raise RuntimeError("test handcrafted sample order differs from Transformer order")
 
     structural_cfg = execution["structural_branch"]
-    structural_validation, structural_test, structural_selection = _fit_structural_branch(
-        _handcrafted_split(train_events, cfg, execution)[1],
+    (
+        structural_validation,
+        structural_test,
+        structural_selection,
+        structural_model_sha256,
+    ) = _fit_structural_branch(
+        train_structural,
         y_train,
         validation_structural,
         y_validation,
@@ -622,7 +678,12 @@ def main() -> int:
         test_handcrafted["physics_only"],
         candidates,
     )
-    structural_core_validation, structural_core_test, structural_weights, structural_validation_nll = _select_pool(
+    (
+        structural_core_validation,
+        structural_core_test,
+        structural_weights,
+        structural_validation_nll,
+    ) = _select_pool(
         core_validation,
         structural_validation,
         y_validation,
@@ -632,29 +693,31 @@ def main() -> int:
     )
 
     topology_cfg = execution["topology_branch"]
-    prior_strength = float(topology_cfg["cell_prior_strength"])
-    prior_floor = float(topology_cfg["cell_prior_floor"])
-    topology_core_validation = np.empty_like(core_validation)
-    topology_core_test = np.empty_like(core_test)
-    for horizon in range(len(cfg.horizon_steps)):
-        topology_core_validation[:, horizon, :] = apply_cell_prior(
-            core_validation[:, horizon, :],
-            np.maximum(validation_handcrafted["topology_prior"][:, horizon, :], prior_floor),
-            strength=prior_strength,
-        )
-        topology_core_test[:, horizon, :] = apply_cell_prior(
-            core_test[:, horizon, :],
-            np.maximum(test_handcrafted["topology_prior"][:, horizon, :], prior_floor),
-            strength=prior_strength,
-        )
-
-    combined_validation, combined_test, combined_weights, combined_validation_nll = _select_pool(
-        topology_core_validation,
+    topology_strength = float(topology_cfg["cell_prior_strength"])
+    topology_floor = float(topology_cfg["cell_prior_floor"])
+    topology_core_validation = _apply_topology_cube(
+        core_validation,
+        validation_handcrafted["topology_prior"],
+        strength=topology_strength,
+        floor=topology_floor,
+    )
+    topology_core_test = _apply_topology_cube(
+        core_test,
+        test_handcrafted["topology_prior"],
+        strength=topology_strength,
+        floor=topology_floor,
+    )
+    combined_validation = _apply_topology_cube(
         structural_core_validation,
-        y_validation,
-        topology_core_test,
+        validation_handcrafted["topology_prior"],
+        strength=topology_strength,
+        floor=topology_floor,
+    )
+    combined_test = _apply_topology_cube(
         structural_core_test,
-        candidates,
+        test_handcrafted["topology_prior"],
+        strength=topology_strength,
+        floor=topology_floor,
     )
 
     validation_variants = {
@@ -685,6 +748,13 @@ def main() -> int:
         validation_sample_events,
         alpha=float(conformal_cfg["alpha"]),
     )
+    core_model_sha256 = _sha256_json(
+        {
+            "learned_model_sha256": learned_model_sha256,
+            "physics_definition": "positive-weight UKF sigma paths; current control then zero-mean control",
+            "core_physics_weights": core_physics_weights,
+        }
+    )
 
     selection_record = {
         "seed": seed,
@@ -694,9 +764,10 @@ def main() -> int:
         "structural_branch": structural_selection,
         "core_structural_weights": structural_weights,
         "core_structural_validation_nll": structural_validation_nll,
-        "combined_weights": combined_weights,
-        "combined_validation_nll": combined_validation_nll,
         "learned_temperatures": [float(value) for value in learned_temperatures],
+        "learned_model_sha256": learned_model_sha256,
+        "core_model_sha256": core_model_sha256,
+        "structural_model_sha256": structural_model_sha256,
         "conformal_alpha": float(conformal_cfg["alpha"]),
         "conformal_qhat": {
             name: [float(value) for value in values] for name, values in conformal_qhat.items()
@@ -714,12 +785,13 @@ def main() -> int:
             [str(value) for value in cell_ids], ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
     ).hexdigest()
-    topology_definition = {
-        "kind": topology_cfg["kind"],
-        "path_reweighting": "hti.phase3_models.history_consistency_weights",
-        "cell_prior_application": "hti.fusion.apply_cell_prior",
-    }
-    topology_definition_sha256 = _sha256_json(topology_definition)
+    topology_definition_sha256 = _sha256_json(
+        {
+            "kind": topology_cfg["kind"],
+            "path_reweighting": "hti.phase3_models.history_consistency_weights",
+            "cell_prior_application": "hti.fusion.apply_cell_prior",
+        }
+    )
     topology_coefficients_sha256 = _sha256_json(topology_cfg)
 
     joint_valid = np.all(y_test >= 0, axis=1)
@@ -733,10 +805,14 @@ def main() -> int:
     suppression_delta = float(topology_cfg["true_support_suppression_delta"])
     suppression = np.zeros_like(final_labels, dtype=np.uint8)
     for horizon in range(final_labels.shape[1]):
-        y = final_labels[:, horizon]
-        core_true = core_test[joint_valid, horizon, :][np.arange(len(y)), y]
-        topology_true = topology_core_test[joint_valid, horizon, :][np.arange(len(y)), y]
-        suppression[:, horizon] = (topology_true < core_true - suppression_delta).astype(np.uint8)
+        labels_h = final_labels[:, horizon]
+        core_true = core_test[joint_valid, horizon, :][np.arange(len(labels_h)), labels_h]
+        topology_true = topology_core_test[joint_valid, horizon, :][
+            np.arange(len(labels_h)), labels_h
+        ]
+        suppression[:, horizon] = (
+            topology_true < core_true - suppression_delta
+        ).astype(np.uint8)
 
     bundle: dict[str, np.ndarray] = {
         "labels": final_labels.astype(np.int64),
@@ -747,16 +823,20 @@ def main() -> int:
         "test_event_ids": np.asarray(splits["test"], dtype=np.int64),
         "orientation_source": np.array(["ukf_attitude_state_proxy"]),
         "fusion_selection_data": np.array(["validation_only"]),
-        "fusion_structural_weights": np.asarray(combined_weights, dtype=float),
+        "fusion_structural_weights": np.asarray(structural_weights, dtype=float),
         "core_physics_weights": np.asarray(core_physics_weights, dtype=float),
-        "core_structural_weights": np.asarray(structural_weights, dtype=float),
         "validation_selection_sha256": np.array([validation_selection_sha256]),
+        "execution_config_sha256": np.array([_sha256_file(args.execution_config)]),
         "topology_definition_sha256": np.array([topology_definition_sha256]),
         "topology_coefficients_sha256": np.array([topology_coefficients_sha256]),
         "cell_partition_sha256": np.array([cell_partition_sha256]),
+        "model_sha256__learned_only": np.array([learned_model_sha256]),
+        "model_sha256__core_hti": np.array([core_model_sha256]),
+        "model_sha256__structural_branch": np.array([structural_model_sha256]),
+        "structural_branch_probabilities": structural_test[joint_valid],
+        "topology_cell_prior": test_handcrafted["topology_prior"][joint_valid],
         "topology_true_path_suppressed": suppression,
         "protocol_sha256": np.array([_sha256_file(args.protocol)]),
-        "execution_config_sha256": np.array([_sha256_file(args.execution_config)]),
         "source_commit": np.array([_source_commit()]),
         "generated_event_count": np.array([generation.generated_events], dtype=np.int64),
         "generated_window_count": np.array([generation.samples], dtype=np.int64),
