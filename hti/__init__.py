@@ -12,9 +12,11 @@ from .assurance import (
 from .benchmarking import (
     BenchmarkMetrics,
     assert_disjoint_event_splits,
+    conformal_set_stats,
     evaluate_probabilities,
     event_bootstrap_delta,
     nll_contributions,
+    reliability_bins,
     selective_risk_curve,
     topk_accuracy,
 )
@@ -64,6 +66,7 @@ __all__ = [
     "confidence_margin",
     "conformal_prediction_set",
     "conformal_quantile",
+    "conformal_set_stats",
     "credible_cell_set",
     "empirical_set_coverage",
     "endpoint_geometry",
@@ -78,6 +81,7 @@ __all__ = [
     "normalized_entropy",
     "occupancy_probabilities",
     "recover_endpoints",
+    "reliability_bins",
     "reweight_paths",
     "select_structural_weight",
     "selective_risk_curve",
