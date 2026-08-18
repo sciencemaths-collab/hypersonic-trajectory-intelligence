@@ -1,0 +1,159 @@
+name: phase3-frozen-five-seed
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["agent/nasa-research-readiness"]
+    paths:
+      - "phase3_final_trigger.txt"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: phase3-final-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify development-pilot approval and frozen hashes
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          approval_path = Path("configs/hti_08_phase3_pilot_approval.json")
+          if not approval_path.is_file():
+              raise SystemExit("Phase 3 final seeds are sealed: pilot approval receipt is missing")
+          approval = json.loads(approval_path.read_text())
+          protocol = Path("configs/hti_08_ablation_frozen.json")
+          execution = Path("configs/hti_08_phase3_execution_frozen.json")
+          digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+          if approval.get("pilot_gate_pass") is not True:
+              raise SystemExit("Phase 3 pilot approval does not record a PASS")
+          if approval.get("final_test_seed_used") is not False:
+              raise SystemExit("pilot approval must certify that no final-test seed was used")
+          if approval.get("development_seed") != 17:
+              raise SystemExit("pilot approval must refer to development seed 17")
+          if approval.get("protocol_sha256") != digest(protocol):
+              raise SystemExit("pilot approval protocol hash is stale")
+          if approval.get("execution_config_sha256") != digest(execution):
+              raise SystemExit("pilot approval execution hash is stale")
+          print("Phase 3 preflight PASS")
+          PY
+
+  seed:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [101, 211, 307, 401, 503]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install frozen research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+          python -m pip freeze > hti08_environment_${{ matrix.seed }}.txt
+      - name: Execute frozen seed
+        run: >-
+          python scripts/hti_08_phase3_run_seed.py
+          --seed ${{ matrix.seed }}
+          --out hti08_ablation_${{ matrix.seed }}.npz
+          --selection-out hti08_selection_${{ matrix.seed }}.json
+          --receipt-out hti08_seed_receipt_${{ matrix.seed }}.json
+      - name: Evaluate immutable final-test bundle
+        run: >-
+          python scripts/hti_08_evaluate_predictions.py
+          --bundle hti08_ablation_${{ matrix.seed }}.npz
+          --report hti08_ablation_report_${{ matrix.seed }}.json
+      - name: Upload frozen seed evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hti08-phase3-seed-${{ matrix.seed }}
+          path: |
+            hti08_ablation_${{ matrix.seed }}.npz
+            hti08_selection_${{ matrix.seed }}.json
+            hti08_seed_receipt_${{ matrix.seed }}.json
+            hti08_ablation_report_${{ matrix.seed }}.json
+            hti08_environment_${{ matrix.seed }}.txt
+          if-no-files-found: error
+
+  aggregate:
+    needs: seed
+    if: always() && needs.seed.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download all five seed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hti08-phase3-seed-*
+          path: phase3_artifacts
+          merge-multiple: true
+      - name: Aggregate all frozen seeds
+        run: >-
+          python scripts/hti_08_phase3_aggregate.py
+          phase3_artifacts/hti08_ablation_report_*.json
+          --out hti08_phase3_multiseed_summary.json
+      - name: Build issue summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("hti08_phase3_multiseed_summary.json").read_text())
+          lines = [
+              "## HTI 0.8 frozen five-seed Phase 3 result",
+              "",
+              f"- seeds: `{report['seeds']}`",
+              f"- protocol SHA-256: `{report['protocol_sha256']}`",
+              f"- execution SHA-256: `{report['execution_config_sha256']}`",
+              "",
+              "### Predeclared claim-gate evidence",
+              "",
+              "| Horizon | Coverage all seeds | NLL better all seeds | ECE gate all seeds | 95% credible coverage all seeds | Bootstrap-support seeds |",
+              "|---|---|---|---|---|---|",
+          ]
+          for gate in report["claim_gate_evidence"]:
+              lines.append(
+                  f"| {gate['horizon_seconds']:.1f} s | "
+                  f"{'PASS' if gate['all_seeds_class_coverage_pass'] else 'FAIL'} | "
+                  f"{'PASS' if gate['all_seeds_nll_better'] else 'FAIL'} | "
+                  f"{'PASS' if gate['all_seeds_ece_regression_pass'] else 'FAIL'} | "
+                  f"{'PASS' if gate['all_seeds_credible_coverage_pass'] else 'FAIL'} | "
+                  f"{gate['bootstrap_support_count']}/5 |"
+              )
+          lines.extend([
+              "",
+              "This is internal synthetic evidence only. External/domain validation remains open regardless of these results.",
+          ])
+          Path("phase3_multiseed_summary.md").write_text("\n".join(lines) + "\n")
+          PY
+      - name: Post frozen result to Phase 3 issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 3 --body-file phase3_multiseed_summary.md
+      - name: Upload aggregate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: hti08-phase3-multiseed-summary
+          path: |
+            hti08_phase3_multiseed_summary.json
+            phase3_multiseed_summary.md
+          if-no-files-found: error

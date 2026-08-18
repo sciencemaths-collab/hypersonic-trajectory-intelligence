@@ -1,0 +1,86 @@
+name: research-ci
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          python -m pip check
+      - name: Compile
+        run: >-
+          python -m compileall -q hti scripts
+          test_v63.py test_assurance.py test_topological_entropy.py
+          test_fusion_benchmarking.py test_phase3.py test_phase3_models.py
+          test_phase3_sampling.py test_phase3_runner.py test_phase3_aggregate.py
+      - name: Unit verification
+        run: >-
+          python -m unittest -v
+          test_v63.py test_assurance.py test_topological_entropy.py
+          test_fusion_benchmarking.py test_phase3.py test_phase3_models.py
+          test_phase3_sampling.py test_phase3_runner.py test_phase3_aggregate.py
+      - name: HTI 0.8 benchmark harness smoke
+        run: >-
+          python scripts/hti_08_evaluate_predictions.py
+          --self-test
+          --report hti08_ablation_smoke_report.json
+      - name: Structural CLI import smoke
+        run: python scripts/hti_structural_analysis.py --help > /dev/null
+      - name: Phase 3 CLI import smoke
+        run: |
+          python scripts/hti_08_phase3_pilot.py --help > /dev/null
+          python scripts/hti_08_phase3_run_seed.py --help > /dev/null
+          python scripts/hti_08_phase3_aggregate.py --help > /dev/null
+      - name: Evidence integrity gate
+        run: >-
+          python scripts/evidence_gate.py
+          benchmark_v64_maneuver_calibrated_metrics.json
+          --fail-on engineering
+          --report evidence_report.json
+      - name: Build evidence manifest
+        run: |
+          python scripts/build_evidence_manifest.py --out evidence_manifest.json
+          python -m pip freeze > ci_environment.txt
+      - name: Lint research modules
+        run: >-
+          ruff check hti scripts
+          test_assurance.py test_topological_entropy.py test_fusion_benchmarking.py
+          test_phase3.py test_phase3_models.py test_phase3_sampling.py
+          test_phase3_runner.py test_phase3_aggregate.py
+      - name: Dependency audit
+        run: pip-audit -r requirements.txt
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-bundle-py${{ matrix.python-version }}
+          path: |
+            evidence_report.json
+            evidence_manifest.json
+            hti08_ablation_smoke_report.json
+            ci_environment.txt
+          if-no-files-found: ignore

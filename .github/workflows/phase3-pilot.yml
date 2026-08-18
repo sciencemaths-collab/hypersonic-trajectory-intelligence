@@ -1,0 +1,118 @@
+name: phase3-coverage-pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["agent/nasa-research-readiness"]
+    paths:
+      - "phase3_pilot_trigger.txt"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: phase3-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Post pilot start receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > phase3_pilot_started.md <<EOF
+          ## Phase 3 development pilot started
+
+          - source commit: `${GITHUB_SHA}`
+          - development seed: `17` (not a final-test seed)
+          - final seeds remain sealed: `101, 211, 307, 401, 503`
+          - workflow run: `${GITHUB_RUN_ID}`
+
+          This is a development-only coverage/sample-support check.
+          EOF
+          gh issue comment 3 --body-file phase3_pilot_started.md
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Run development-only coverage pilot
+        run: >-
+          python scripts/hti_08_phase3_pilot.py
+          --seed 17
+          --out hti08_phase3_pilot.json
+      - name: Summarize pilot gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("hti08_phase3_pilot.json").read_text())
+          print(json.dumps({
+              "pilot_gate_pass": report["pilot_gate_pass"],
+              "samples": report["samples"],
+              "coverage": report["coverage"],
+          }, indent=2))
+          lines = [
+              "## Phase 3 development coverage pilot",
+              "",
+              f"- source commit: `{report['source_commit']}`",
+              f"- development seed: `{report['seed']}` (not a final-test seed)",
+              f"- protocol SHA-256: `{report['protocol_sha256']}`",
+              f"- execution-config SHA-256: `{report['execution_config_sha256']}`",
+              f"- generated events: **{report['generated_events']}**",
+              f"- jointly eligible windows: **{report['samples']}**",
+              f"- minimum shared source frame: **{report['minimum_joint_source_frame']}**",
+              f"- sample gate: **{'PASS' if report['window_gate_pass'] else 'FAIL'}**",
+              f"- frozen test-class-coverage gate: **{'PASS' if report['coverage_gate_pass'] else 'FAIL'}**",
+              f"- overall pilot gate: **{'PASS' if report['pilot_gate_pass'] else 'FAIL'}**",
+              "",
+              "### Class coverage by split/horizon",
+              "",
+              "```json",
+              json.dumps(report["coverage"], indent=2),
+              "```",
+              "",
+              "This is development-only evidence and does not use seeds 101/211/307/401/503.",
+          ]
+          Path("phase3_pilot_summary.md").write_text("\n".join(lines) + "\n")
+          PY
+      - name: Post pilot result to Phase 3 issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 3 --body-file phase3_pilot_summary.md
+      - name: Post pilot failure receipt
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > phase3_pilot_failure.md <<EOF
+          ## Phase 3 development pilot workflow failure
+
+          - source commit: `${GITHUB_SHA}`
+          - development seed: `17` (not a final-test seed)
+          - workflow run: `${GITHUB_RUN_ID}`
+          - final-test seeds were not authorized by this run
+
+          The pilot workflow failed before producing a valid PASS receipt. The five frozen final seeds remain sealed.
+          EOF
+          gh issue comment 3 --body-file phase3_pilot_failure.md
+      - name: Upload pilot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hti08-phase3-development-pilot
+          path: |
+            hti08_phase3_pilot.json
+            phase3_pilot_summary.md
+            phase3_pilot_started.md
+            phase3_pilot_failure.md
+          if-no-files-found: warn

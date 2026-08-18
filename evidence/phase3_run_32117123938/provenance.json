@@ -1,0 +1,26 @@
+{
+  "schema": "hti.phase3-evidence-provenance.v1",
+  "workflow_run_id": 32117123938,
+  "workflow_run_url": "https://github.com/sciencemaths-collab/hypersonic-trajectory-intelligence/actions/runs/32117123938",
+  "bundle_source_commit": "eac6b47c81255285012b0183c46d32c4d93f905d",
+  "evaluator_source_commit": "e873767f8c674fed07a4152ba153c6fce083d827",
+  "protocol_sha256": "2155ddd14aba790d31988c728f7c6d3e8bb0a8c4389d671a5e4ca204c7b63bbb",
+  "execution_config_sha256": "f34489298c160ffdcedba8bfe18cad39f270bdd61788e0d6ffbc47bca75118e3",
+  "immutable_bundles": {
+    "101": "e36a37de7f1769fea55423bb1f26db332ffd23c6ebd673051f454167b56a60e4",
+    "211": "c09fd1cc6774df81456b67db196731db89971d64e617fe299257972c4e651911",
+    "307": "51efb86b06adbfa268246ce7cbb9497633eaf0fb2377228632d40d1fe976dad0",
+    "401": "2daa5d0e8253efc6bd2868c97568eb1da37a0c23fb882dfed037bdfd9f3a8fc0",
+    "503": "52833a9b8ed7d83f24e00fcbd226167944b5a99623d4257fe2322529214d1745"
+  },
+  "derived_reports": {
+    "hti08_ablation_report_101.json": "de69dd33bc1e6ca6df7911a73bbbe0ea7264b3a7d6d17c5efc40a159c73c6865",
+    "hti08_ablation_report_211.json": "98ed9d87f4eaf1a3e59bdaa13509ab0f731bb1936968ed93d42f62222de5dcb5",
+    "hti08_ablation_report_307.json": "33e8f6d8efa658dd1cea226356e26453994f47d4698dde7641476981499967c2",
+    "hti08_ablation_report_401.json": "b0b0932b6438627155c485a540256647d25a1625275fc24ae2f19f1606a58f30",
+    "hti08_ablation_report_503.json": "10b2831481044f3c3708774de6b727ad7e11f773cc8f0b6861fa3ac95005670b",
+    "hti08_phase3_multiseed_summary.json": "55d420fbaaf3342a2d48d3b75d1d3c79ae67a66a1cbe178059f44a98bb9d5654"
+  },
+  "claim_gate": "fail",
+  "regeneration_or_retraining_used": false
+}
