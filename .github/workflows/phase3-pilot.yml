@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: phase3-pilot-${{ github.ref }}
@@ -45,11 +46,40 @@ jobs:
               "samples": report["samples"],
               "coverage": report["coverage"],
           }, indent=2))
+          lines = [
+              "## Phase 3 development coverage pilot",
+              "",
+              f"- source commit: `{report['source_commit']}`",
+              f"- development seed: `{report['seed']}` (not a final-test seed)",
+              f"- protocol SHA-256: `{report['protocol_sha256']}`",
+              f"- execution-config SHA-256: `{report['execution_config_sha256']}`",
+              f"- generated events: **{report['generated_events']}**",
+              f"- windows: **{report['samples']}**",
+              f"- sample gate: **{'PASS' if report['window_gate_pass'] else 'FAIL'}**",
+              f"- class-coverage gate: **{'PASS' if report['coverage_gate_pass'] else 'FAIL'}**",
+              f"- overall pilot gate: **{'PASS' if report['pilot_gate_pass'] else 'FAIL'}**",
+              "",
+              "### Class coverage by split/horizon",
+              "",
+              "```json",
+              json.dumps(report["coverage"], indent=2),
+              "```",
+              "",
+              "This is development-only evidence and does not use seeds 101/211/307/401/503.",
+          ]
+          Path("phase3_pilot_summary.md").write_text("\n".join(lines) + "\n")
           PY
+      - name: Post pilot result to Phase 3 issue
+        if: always() && hashFiles('phase3_pilot_summary.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment 3 --body-file phase3_pilot_summary.md
       - name: Upload pilot evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: hti08-phase3-development-pilot
-          path: hti08_phase3_pilot.json
+          path: |
+            hti08_phase3_pilot.json
+            phase3_pilot_summary.md
           if-no-files-found: error
