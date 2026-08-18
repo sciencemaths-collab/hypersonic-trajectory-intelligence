@@ -15,7 +15,11 @@ from hti.benchmarking import (
     selective_risk_curve,
 )
 from hti.fusion import apply_cell_prior, log_linear_pool, select_structural_weight
-from scripts.hti_08_evaluate_predictions import _self_test_bundle, evaluate
+from scripts.hti_08_evaluate_predictions import (
+    _apply_topology_cube,
+    _self_test_bundle,
+    evaluate,
+)
 
 
 class FusionBenchmarkingTests(unittest.TestCase):
@@ -167,6 +171,55 @@ class FusionBenchmarkingTests(unittest.TestCase):
         self.assertTrue(contract["structural_fusion_reproducible"])
         self.assertTrue(contract["topology_application_reproducible"])
         self.assertTrue(contract["combined_reproducible"])
+
+    def test_float32_serialized_fusions_satisfy_composition_contract(self):
+        bundle = self.self_test_bundle()
+        transformer = bundle["core_transformer_probabilities"].astype(np.float32)
+        physics = bundle["probs__physics_only"]
+        core = np.empty(transformer.shape, dtype=np.float32)
+        for horizon, weight in enumerate(bundle["core_physics_weights"]):
+            core[:, horizon, :] = log_linear_pool(
+                transformer[:, horizon, :],
+                physics[:, horizon, :],
+                structural_weight=float(weight),
+            )
+
+        structural = bundle["structural_branch_probabilities"]
+        core_plus_structural = np.empty(core.shape, dtype=np.float32)
+        for horizon, weight in enumerate(bundle["fusion_structural_weights"]):
+            core_plus_structural[:, horizon, :] = log_linear_pool(
+                core[:, horizon, :],
+                structural[:, horizon, :],
+                structural_weight=float(weight),
+            )
+
+        topology = self.frozen_execution()["topology_branch"]
+        bundle["core_transformer_probabilities"] = transformer
+        bundle["probs__core_hti"] = core
+        bundle["probs__core_plus_structural"] = core_plus_structural
+        bundle["probs__core_plus_topology"] = _apply_topology_cube(
+            core,
+            bundle["topology_cell_prior"],
+            strength=float(topology["cell_prior_strength"]),
+            floor=float(topology["cell_prior_floor"]),
+        )
+        bundle["probs__hti_08_combined"] = _apply_topology_cube(
+            core_plus_structural,
+            bundle["topology_cell_prior"],
+            strength=float(topology["cell_prior_strength"]),
+            floor=float(topology["cell_prior_floor"]),
+        )
+
+        report = self.evaluate_bundle(bundle)
+        self.assertTrue(report["contract"]["core_fusion_reproducible"])
+
+    def test_float32_contract_still_rejects_one_ulp_composition_change(self):
+        bundle = self.self_test_bundle()
+        core = bundle["probs__core_hti"].astype(np.float32)
+        core[0, 0, 0] = np.nextafter(core[0, 0, 0], np.float32(1.0))
+        bundle["probs__core_hti"] = core
+        with self.assertRaisesRegex(ValueError, "core_hti"):
+            self.evaluate_bundle(bundle)
 
     def test_frozen_evaluator_rejects_unreproducible_core_fusion(self):
         bundle = self.self_test_bundle()

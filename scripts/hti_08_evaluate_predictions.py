@@ -287,6 +287,30 @@ def _validate_fusion_weights(
     return values
 
 
+def _matches_serialized_probabilities(
+    reproduced: np.ndarray,
+    recorded: np.ndarray,
+) -> bool:
+    """Compare a reconstruction at the precision recorded by the producer.
+
+    The Transformer path is float32, so ``_select_pool`` serializes the core and
+    structural fusion cubes as float32 even though ``log_linear_pool`` computes
+    in float64. Casting the reconstruction to the recorded dtype preserves a
+    strict composition check without rejecting the producer's own rounding.
+    """
+
+    recorded_array = np.asarray(recorded)
+    reproduced_array = np.asarray(reproduced, dtype=recorded_array.dtype)
+    return bool(
+        np.allclose(
+            reproduced_array,
+            recorded_array,
+            rtol=1e-10,
+            atol=1e-12,
+        )
+    )
+
+
 def _validate_contract(
     bundle: dict[str, np.ndarray],
     config: dict[str, object],
@@ -363,7 +387,10 @@ def _validate_contract(
             variants["physics_only"][:, horizon, :],
             structural_weight=float(weight),
         )
-        if not np.allclose(reproduced_core, variants["core_hti"][:, horizon, :], rtol=1e-10, atol=1e-12):
+        if not _matches_serialized_probabilities(
+            reproduced_core,
+            bundle["probs__core_hti"][:, horizon, :],
+        ):
             raise ValueError("core_hti does not reproduce from Transformer, physics-only, and frozen core weights")
 
     if "structural_branch_probabilities" not in bundle:
@@ -379,11 +406,9 @@ def _validate_contract(
             raw_structural[:, horizon, :],
             structural_weight=float(weight),
         )
-        if not np.allclose(
+        if not _matches_serialized_probabilities(
             reproduced_structural,
-            variants["core_plus_structural"][:, horizon, :],
-            rtol=1e-10,
-            atol=1e-12,
+            bundle["probs__core_plus_structural"][:, horizon, :],
         ):
             raise ValueError("core_plus_structural does not reproduce from core, raw structural probabilities, and frozen weights")
 
@@ -401,7 +426,10 @@ def _validate_contract(
         strength=topology_strength,
         floor=topology_floor,
     )
-    if not np.allclose(reproduced_topology, variants["core_plus_topology"], rtol=1e-10, atol=1e-12):
+    if not _matches_serialized_probabilities(
+        reproduced_topology,
+        bundle["probs__core_plus_topology"],
+    ):
         raise ValueError("core_plus_topology does not reproduce from core and frozen topology prior")
     reproduced_combined = _apply_topology_cube(
         variants["core_plus_structural"],
@@ -409,7 +437,10 @@ def _validate_contract(
         strength=topology_strength,
         floor=topology_floor,
     )
-    if not np.allclose(reproduced_combined, variants["hti_08_combined"], rtol=1e-10, atol=1e-12):
+    if not _matches_serialized_probabilities(
+        reproduced_combined,
+        bundle["probs__hti_08_combined"],
+    ):
         raise ValueError("hti_08_combined does not reproduce from structural fusion plus frozen topology prior")
 
     orientation_source = str(_scalar(bundle, "orientation_source"))
