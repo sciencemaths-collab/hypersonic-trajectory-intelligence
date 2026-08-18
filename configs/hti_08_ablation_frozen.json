@@ -27,6 +27,15 @@
     "selection_metric": "negative_log_likelihood",
     "tie_break": "smaller_structural_weight"
   },
+  "bundle_contract": {
+    "require_validation_selection_sha256": true,
+    "require_reproducible_combined_probabilities": true,
+    "require_topology_definition_sha256": true,
+    "require_topology_coefficients_sha256": true,
+    "require_ordered_cell_ids_per_variant": true,
+    "require_cell_partition_sha256": true,
+    "require_conformal_calibration_sha256_when_present": true
+  },
   "metrics": {
     "top_k": [1, 3, 5],
     "ece_bins": 15,

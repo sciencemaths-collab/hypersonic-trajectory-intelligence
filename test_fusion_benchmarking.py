@@ -143,6 +143,30 @@ class FusionBenchmarkingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate(bundle, self.frozen_config())
 
+    def test_frozen_evaluator_rejects_unreproducible_combined_predictions(self):
+        bundle = _self_test_bundle()
+        bundle["probs__hti_08_combined"] = bundle["probs__core_hti"].copy()
+        with self.assertRaisesRegex(ValueError, "does not reproduce"):
+            evaluate(bundle, self.frozen_config())
+
+    def test_frozen_evaluator_rejects_mismatched_cell_partition(self):
+        bundle = _self_test_bundle()
+        bundle["cell_ids__physics_only"] = bundle["cell_ids__physics_only"][::-1]
+        with self.assertRaisesRegex(ValueError, "cell partitions"):
+            evaluate(bundle, self.frozen_config())
+
+    def test_frozen_evaluator_requires_calibration_provenance(self):
+        bundle = _self_test_bundle()
+        del bundle["conformal_calibration_sha256__core_hti"]
+        with self.assertRaisesRegex(ValueError, "conformal_calibration_sha256"):
+            evaluate(bundle, self.frozen_config())
+
+    def test_frozen_evaluator_requires_topology_provenance(self):
+        bundle = _self_test_bundle()
+        del bundle["topology_coefficients_sha256"]
+        with self.assertRaisesRegex(ValueError, "topology_coefficients_sha256"):
+            evaluate(bundle, self.frozen_config())
+
 
 if __name__ == "__main__":
     unittest.main()

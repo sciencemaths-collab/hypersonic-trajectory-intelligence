@@ -90,6 +90,22 @@ def _scalar(bundle: dict[str, np.ndarray], key: str) -> object:
     return values[0].item() if hasattr(values[0], "item") else values[0]
 
 
+def _sha256_value(bundle: dict[str, np.ndarray], key: str) -> str:
+    value = str(_scalar(bundle, key)).lower()
+    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise ValueError(f"bundle field {key!r} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _cell_partition_sha256(cell_ids: np.ndarray) -> str:
+    encoded = json.dumps(
+        [str(value) for value in np.asarray(cell_ids).reshape(-1)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _horizon_values(bundle: dict[str, np.ndarray], key: str, horizons: int) -> np.ndarray | None:
     if key not in bundle:
         return None
@@ -134,6 +150,12 @@ def _self_test_bundle() -> dict[str, np.ndarray]:
         )
     variants["hti_08_combined"] = combined
 
+    cell_ids = np.array([f"cell-{index}" for index in range(classes)])
+    validation_digest = hashlib.sha256(b"synthetic-validation-selection").hexdigest()
+    topology_definition_digest = hashlib.sha256(b"synthetic-topology-definition").hexdigest()
+    topology_coefficients_digest = hashlib.sha256(b"synthetic-topology-coefficients").hexdigest()
+    partition_digest = _cell_partition_sha256(cell_ids)
+
     bundle: dict[str, np.ndarray] = {
         "labels": labels,
         "event_ids": event_ids,
@@ -142,11 +164,19 @@ def _self_test_bundle() -> dict[str, np.ndarray]:
         "validation_event_ids": np.arange(200, 205, dtype=int),
         "test_event_ids": test_event_ids,
         "orientation_source": np.array(["synthetic_smoke"]),
+        "fusion_selection_data": np.array(["validation_only"]),
+        "fusion_structural_weights": np.full(horizons, 0.50, dtype=float),
+        "validation_selection_sha256": np.array([validation_digest]),
+        "topology_definition_sha256": np.array([topology_definition_digest]),
+        "topology_coefficients_sha256": np.array([topology_coefficients_digest]),
+        "cell_partition_sha256": np.array([partition_digest]),
         "topology_true_path_suppressed": np.zeros((samples, horizons), dtype=np.uint8),
     }
     for name, probabilities in variants.items():
         bundle[f"probs__{name}"] = probabilities
+        bundle[f"cell_ids__{name}"] = cell_ids
         bundle[f"conformal_qhat__{name}"] = np.full(horizons, 0.70, dtype=float)
+        bundle[f"conformal_calibration_sha256__{name}"] = np.array([validation_digest])
     return bundle
 
 
@@ -181,6 +211,47 @@ def _validate_contract(
     if missing_variants:
         raise ValueError(f"bundle is missing frozen variants: {missing_variants}")
 
+    reference_cells: np.ndarray | None = None
+    for name in sorted(required_variants):
+        key = f"cell_ids__{name}"
+        if key not in bundle:
+            raise ValueError(f"bundle is missing ordered cell partition {key!r}")
+        cells = np.asarray(bundle[key]).reshape(-1)
+        if cells.size != variants[name].shape[2] or len(np.unique(cells)) != cells.size:
+            raise ValueError(f"{key!r} must contain one unique ID per probability class")
+        if reference_cells is None:
+            reference_cells = cells
+        elif not np.array_equal(cells, reference_cells):
+            raise ValueError("variant cell partitions or ordered cell identities differ")
+    partition_sha256 = _sha256_value(bundle, "cell_partition_sha256")
+    if partition_sha256 != _cell_partition_sha256(reference_cells):
+        raise ValueError("cell_partition_sha256 does not match the ordered cell IDs")
+
+    if str(_scalar(bundle, "fusion_selection_data")) != "validation_only":
+        raise ValueError("fusion_selection_data must be 'validation_only'")
+    validation_sha256 = _sha256_value(bundle, "validation_selection_sha256")
+    topology_definition_sha256 = _sha256_value(bundle, "topology_definition_sha256")
+    topology_coefficients_sha256 = _sha256_value(bundle, "topology_coefficients_sha256")
+    weights = _horizon_values(bundle, "fusion_structural_weights", labels.shape[1])
+    if weights is None or (weights < 0.0).any() or (weights > 1.0).any():
+        raise ValueError("fusion_structural_weights must contain frozen values in [0, 1]")
+    candidates = np.asarray(config["fusion_policy"]["candidate_structural_weights"], dtype=float)
+    if any(not np.any(np.isclose(weight, candidates, rtol=0.0, atol=1e-12)) for weight in weights):
+        raise ValueError("fusion_structural_weights must come from the frozen candidate grid")
+    for horizon, weight in enumerate(weights):
+        reproduced = log_linear_pool(
+            variants["core_hti"][:, horizon, :],
+            variants["core_plus_structural"][:, horizon, :],
+            structural_weight=float(weight),
+        )
+        if not np.allclose(reproduced, variants["hti_08_combined"][:, horizon, :], rtol=1e-10, atol=1e-12):
+            raise ValueError("hti_08_combined does not reproduce from frozen fusion inputs and weights")
+
+    for name in required_variants:
+        qhat_key = f"conformal_qhat__{name}"
+        if qhat_key in bundle:
+            _sha256_value(bundle, f"conformal_calibration_sha256__{name}")
+
     orientation_source = str(_scalar(bundle, "orientation_source"))
     if not orientation_source.strip():
         raise ValueError("orientation_source must be non-empty")
@@ -197,6 +268,11 @@ def _validate_contract(
     return {
         "seed": seed,
         "orientation_source": orientation_source,
+        "cell_partition_sha256": partition_sha256,
+        "validation_selection_sha256": validation_sha256,
+        "topology_definition_sha256": topology_definition_sha256,
+        "topology_coefficients_sha256": topology_coefficients_sha256,
+        "fusion_structural_weights": [float(value) for value in weights],
         "split_event_counts": {
             "train": int(len(np.unique(train_ids))),
             "validation": int(len(np.unique(validation_ids))),

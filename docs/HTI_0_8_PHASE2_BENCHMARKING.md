@@ -58,20 +58,28 @@ validation_event_ids           complete-event validation manifest
 test_event_ids                 complete-event test manifest
 orientation_source             scalar Unicode provenance label
 probs__<variant>               shape (samples, horizons, classes) or (samples, classes)
+cell_ids__<variant>            ordered unique class/cell IDs; identical across variants
+cell_partition_sha256          SHA-256 of the frozen grid/partition definition
+fusion_selection_data          literal `validation_only`
+fusion_structural_weights      one frozen candidate-grid weight per horizon
+validation_selection_sha256    SHA-256 of the retained validation-selection artifact
+topology_definition_sha256     SHA-256 of the frozen topology definitions
+topology_coefficients_sha256   SHA-256 of the frozen topology coefficients
 topology_true_path_suppressed  shape matching labels when required by topology policy
 ```
 
 The evaluator rejects overlapping train/validation/test event identities. The unique `event_ids` attached to the prediction rows must exactly equal the declared test-event set.
 
-All variants listed in the frozen protocol must be present in a final bundle and must use the same samples, labels, horizon definitions, event identities, and cell partition.
+All variants listed in the frozen protocol must be present in a final bundle and must use the same samples, labels, horizon definitions, event identities, class count, and ordered cell partition. The evaluator rejects inconsistent cell IDs and recomputes `hti_08_combined` from `core_hti`, `core_plus_structural`, and the recorded frozen weights.
 
 Optional pre-calibrated conformal thresholds may be supplied as:
 
 ```text
 conformal_qhat__<variant>      scalar or one value per horizon
+conformal_calibration_sha256__<variant>  SHA-256 of its retained calibration artifact
 ```
 
-These thresholds are **evaluated only**. The evaluator never fits them on final-test labels.
+These thresholds are **evaluated only**. The evaluator never fits them on final-test labels, and rejects thresholds without calibration-artifact provenance.
 
 ## Evaluation
 
