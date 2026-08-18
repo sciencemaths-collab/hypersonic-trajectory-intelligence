@@ -39,6 +39,7 @@ DEFAULT_FILES = (
     "scripts/hti_08_phase3_aggregate.py",
     "configs/hti_08_ablation_frozen.json",
     "configs/hti_08_phase3_execution_frozen.json",
+    "configs/hti_08_phase3_pilot_approval.json",
     ".github/workflows/ci.yml",
     ".github/workflows/phase3-pilot.yml",
     ".github/workflows/phase3-final.yml",

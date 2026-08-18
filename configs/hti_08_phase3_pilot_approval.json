@@ -1,0 +1,14 @@
+{
+  "schema": "hti.phase3-pilot-approval.v1",
+  "status": "approved-for-frozen-final-seed-execution",
+  "pilot_run_id": 32116240226,
+  "pilot_run_url": "https://github.com/sciencemaths-collab/hypersonic-trajectory-intelligence/actions/runs/32116240226",
+  "pilot_source_commit": "dac9e917e8daa97ff2876977ee6c6cffdef42b1b",
+  "development_seed": 17,
+  "pilot_gate_pass": true,
+  "final_test_seed_used": false,
+  "eligible_windows": 7488,
+  "protocol_sha256": "2155ddd14aba790d31988c728f7c6d3e8bb0a8c4389d671a5e4ca204c7b63bbb",
+  "execution_config_sha256": "f34489298c160ffdcedba8bfe18cad39f270bdd61788e0d6ffbc47bca75118e3",
+  "approval_note": "Receipt derived from the immutable development-only pilot artifact. No frozen final-test seed or prediction score was used to approve execution."
+}
