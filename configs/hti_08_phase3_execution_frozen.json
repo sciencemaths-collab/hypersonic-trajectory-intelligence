@@ -1,0 +1,64 @@
+{
+  "schema": "hti.phase3-execution.v0.8",
+  "status": "frozen-before-final-test",
+  "protocol": "configs/hti_08_ablation_frozen.json",
+  "scope": "synthetic non-sensitive civil aerospace internal validation",
+  "trajectory_generation": {
+    "target_event_groups": 72,
+    "minimum_windows": 3200,
+    "traj_steps": 180,
+    "offline_stride": 2,
+    "window": 10,
+    "maneuver_prob": 0.14,
+    "force_std_n": 25000.0,
+    "torque_std_nm": 12000.0,
+    "max_mach": 20.0,
+    "box_cross_scale": 0.012,
+    "box_cross_min_m": 18.0,
+    "box_cross_max_m": 160.0
+  },
+  "transformer": {
+    "epochs": 10,
+    "batch_size": 128,
+    "d_model": 80,
+    "nhead": 4,
+    "nlayers": 2,
+    "ff_mult": 4,
+    "dropout": 0.10,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.0001,
+    "label_smoothing": 0.05
+  },
+  "structural_branch": {
+    "history_points": 8,
+    "body_length_m": 20.0,
+    "ridge_lambda": 0.05,
+    "temperature_candidates": [0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 2.0]
+  },
+  "physics_branch": {
+    "one_hot_smoothing": 0.02,
+    "unresolved_policy": "uniform_mass"
+  },
+  "topology_branch": {
+    "kind": "history_consistency_sigma_path_reweighting",
+    "history_angle_gamma": 1.5,
+    "cell_prior_strength": 0.35,
+    "cell_prior_floor": 0.001,
+    "true_support_suppression_delta": 0.02
+  },
+  "fusion": {
+    "candidate_weights_from_protocol": true,
+    "selection_data": "validation_only",
+    "selection_metric": "negative_log_likelihood"
+  },
+  "conformal": {
+    "alpha": 0.05,
+    "calibration_data": "validation_only"
+  },
+  "execution": {
+    "device": "cpu",
+    "seed_jobs_may_run_in_parallel": true,
+    "timeout_minutes_per_seed": 60
+  },
+  "freeze_note": "These execution parameters are fixed before generating Phase 3 final-test prediction bundles. Final-test outcomes must not be used to change them."
+}
