@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 import numpy as np
 
@@ -12,9 +14,13 @@ from hti.benchmarking import (
     selective_risk_curve,
 )
 from hti.fusion import apply_cell_prior, log_linear_pool, select_structural_weight
+from scripts.hti_08_evaluate_predictions import _self_test_bundle, evaluate
 
 
 class FusionBenchmarkingTests(unittest.TestCase):
+    def frozen_config(self):
+        return json.loads(Path("configs/hti_08_ablation_frozen.json").read_text(encoding="utf-8"))
+
     def test_log_pool_endpoints_recover_sources(self):
         core = np.array([[0.7, 0.2, 0.1]])
         structural = np.array([[0.2, 0.7, 0.1]])
@@ -124,6 +130,18 @@ class FusionBenchmarkingTests(unittest.TestCase):
         self.assertLess(result["ci95_high"], 0.0)
         self.assertEqual(result["favorable_direction"], 1.0)
         self.assertEqual(result["interval_supports_direction"], 1.0)
+
+    def test_frozen_evaluator_rejects_missing_variant(self):
+        bundle = _self_test_bundle()
+        del bundle["probs__physics_only"]
+        with self.assertRaises(ValueError):
+            evaluate(bundle, self.frozen_config())
+
+    def test_frozen_evaluator_rejects_split_leakage(self):
+        bundle = _self_test_bundle()
+        bundle["validation_event_ids"] = np.array([100, 200, 201], dtype=int)
+        with self.assertRaises(ValueError):
+            evaluate(bundle, self.frozen_config())
 
 
 if __name__ == "__main__":
