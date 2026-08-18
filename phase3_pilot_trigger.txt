@@ -2,4 +2,4 @@ HTI 0.8 Phase 3 development coverage pilot
 seed=17
 purpose=pre-final class-coverage and sample-support check
 final_test_seed=false
-rerun=development-revision-2-corrected-composition-contract
+rerun=development-revision-2-shared-eligibility-current-green-head
