@@ -10,17 +10,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from hti.benchmarking import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from hti.benchmarking import (  # noqa: E402
     event_bootstrap_delta,
     evaluate_probabilities,
     nll_contributions,
     selective_risk_curve,
 )
-from hti.fusion import log_linear_pool
+from hti.fusion import log_linear_pool  # noqa: E402
 
 
 def _as_horizon_matrix(array: np.ndarray) -> np.ndarray:
