@@ -28,9 +28,13 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           python -m pip check
       - name: Compile
-        run: python -m compileall -q hti scripts test_v63.py test_assurance.py
+        run: >-
+          python -m compileall -q hti scripts
+          test_v63.py test_assurance.py test_topological_entropy.py
       - name: Unit verification
-        run: python -m unittest -v test_v63.py test_assurance.py
+        run: >-
+          python -m unittest -v
+          test_v63.py test_assurance.py test_topological_entropy.py
       - name: Evidence integrity gate
         run: >-
           python scripts/evidence_gate.py
@@ -41,8 +45,8 @@ jobs:
         run: |
           python scripts/build_evidence_manifest.py --out evidence_manifest.json
           python -m pip freeze > ci_environment.txt
-      - name: Lint assurance layer
-        run: ruff check hti scripts test_assurance.py
+      - name: Lint research modules
+        run: ruff check hti scripts test_assurance.py test_topological_entropy.py
       - name: Dependency audit
         run: pip-audit -r requirements.txt
       - name: Upload evidence bundle
