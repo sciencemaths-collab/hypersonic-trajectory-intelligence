@@ -1,4 +1,4 @@
-"""Assurance utilities for Hypersonic Trajectory Intelligence research outputs."""
+"""Research utilities for Hypersonic Trajectory Intelligence."""
 
 from .assurance import (
     AssuranceDecision,
@@ -9,13 +9,53 @@ from .assurance import (
     empirical_set_coverage,
     normalized_entropy,
 )
+from .topological_entropy import (
+    BackwardExplanation,
+    DistributionSummary,
+    EndpointObservation,
+    SphericalKeepOutZone,
+    StructuralMotionFeatures,
+    circular_smooth,
+    condition_paths_on_terminal_cell,
+    credible_cell_set,
+    endpoint_geometry,
+    endpoint_observations_from_centerline,
+    estimate_structural_motion,
+    explain_terminal_cell,
+    occupancy_probabilities,
+    recover_endpoints,
+    reweight_paths,
+    spherical_zone_penalties,
+    summarize_distribution,
+    terminal_cell_probabilities,
+    topology_weight,
+)
 
 __all__ = [
     "AssuranceDecision",
+    "BackwardExplanation",
+    "DistributionSummary",
+    "EndpointObservation",
+    "SphericalKeepOutZone",
+    "StructuralMotionFeatures",
     "assess_prediction",
+    "circular_smooth",
+    "condition_paths_on_terminal_cell",
+    "confidence_margin",
     "conformal_prediction_set",
     "conformal_quantile",
-    "confidence_margin",
+    "credible_cell_set",
     "empirical_set_coverage",
+    "endpoint_geometry",
+    "endpoint_observations_from_centerline",
+    "estimate_structural_motion",
+    "explain_terminal_cell",
     "normalized_entropy",
+    "occupancy_probabilities",
+    "recover_endpoints",
+    "reweight_paths",
+    "spherical_zone_penalties",
+    "summarize_distribution",
+    "terminal_cell_probabilities",
+    "topology_weight",
 ]
