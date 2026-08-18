@@ -1,9 +1,14 @@
+import hashlib
+import json
 import unittest
+from pathlib import Path
 
 from hti.phase3_aggregate import METRIC_NAMES, aggregate_reports
 
 
 class Phase3AggregateTests(unittest.TestCase):
+    evidence_dir = Path("evidence/phase3_run_32117123938")
+
     def protocol(self):
         return {
             "seeds": [101, 211, 307, 401, 503],
@@ -109,6 +114,28 @@ class Phase3AggregateTests(unittest.TestCase):
                 protocol_sha256="a" * 64,
                 execution_config_sha256="b" * 64,
             )
+
+    def test_published_phase3_evidence_matches_provenance(self):
+        provenance = json.loads(
+            (self.evidence_dir / "provenance.json").read_text(encoding="utf-8")
+        )
+        for filename, expected in provenance["derived_reports"].items():
+            digest = hashlib.sha256((self.evidence_dir / filename).read_bytes()).hexdigest()
+            self.assertEqual(digest, expected)
+
+        summary = json.loads(
+            (self.evidence_dir / "hti08_phase3_multiseed_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(summary["seeds"], [101, 211, 307, 401, 503])
+        self.assertTrue(
+            all(
+                not gate["all_seeds_nll_better"]
+                and gate["bootstrap_support_count"] == 0
+                for gate in summary["claim_gate_evidence"]
+            )
+        )
 
 
 if __name__ == "__main__":

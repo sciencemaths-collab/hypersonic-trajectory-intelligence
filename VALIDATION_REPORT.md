@@ -4,6 +4,8 @@
 
 **Recorded evidence status: research prototype; not externally validated; not operationally certified.**
 
+**Frozen Phase 3 result: the Full HTI 0.8 predictive-improvement claim gate failed.**
+
 This report distinguishes code verification, numerical checks, model-performance evidence, and external validation. Passing a software test is not treated as proof that the physical model is valid for an operational environment.
 
 ## Intended use of this report
@@ -100,6 +102,44 @@ Consequences:
 
 The evidence gate now requires at least 50% class coverage per split/horizon before it will mark that scientific-readiness check as passing. This is a project research gate, not a NASA requirement.
 
+## Frozen five-seed Phase 3 benchmark
+
+The pre-registered eight-variant comparison was executed with seeds `101`, `211`,
+`307`, `401`, and `503` at 0.4, 0.5, and 0.6 seconds. GitHub Actions run
+[`32117123938`](https://github.com/sciencemaths-collab/hypersonic-trajectory-intelligence/actions/runs/32117123938)
+produced immutable prediction bundles from commit
+`eac6b47c81255285012b0183c46d32c4d93f905d`.
+
+The original workflow stopped before metrics because its evaluator reconstructed
+fusion in float64 but required near-exact agreement with the producer's float32
+serialization. The largest difference was approximately `3.0e-8`. Evaluator
+commit `e873767f8c674fed07a4152ba153c6fce083d827` corrects this representation
+contract while retaining one-ULP tampering detection and separately recording
+bundle-producing and evaluator provenance. No final seed was regenerated, no
+model was retrained, and no frozen parameter was changed.
+
+| Horizon | Core HTI NLL | Full HTI NLL | Full − Core | Core ECE | Full ECE | Bootstrap improvement support |
+|---|---:|---:|---:|---:|---:|---:|
+| 0.4 s | 1.7879 | 1.9082 | +0.1203 | 0.1076 | 0.2925 | 0/5 seeds |
+| 0.5 s | 1.7052 | 1.8302 | +0.1250 | 0.1120 | 0.2932 | 0/5 seeds |
+| 0.6 s | 1.6823 | 1.7962 | +0.1139 | 0.1030 | 0.2885 | 0/5 seeds |
+
+The locked claim gates failed:
+
+- Full HTI NLL was worse than Core HTI for every seed and horizon.
+- ECE non-regression failed for every seed and horizon.
+- All-seed class coverage passed at 0.4 seconds but failed at 0.5 and 0.6 seconds.
+- All-seed credible-region coverage failed at all three horizons.
+- No paired event-bootstrap interval supported Full HTI improvement.
+
+This is a valid negative/falsification result. It does not support a claim that
+Full HTI 0.8 improves prediction over Core HTI on the frozen synthetic benchmark.
+The final-test outcomes must not be used to tune the frozen parameters or replace
+the configured seeds.
+
+Complete per-seed reports, the aggregate summary, and checksum provenance are in
+[`evidence/phase3_run_32117123938`](evidence/phase3_run_32117123938/README.md).
+
 ## Engineering-integrity gate
 
 `scripts/evidence_gate.py` checks:
@@ -161,9 +201,9 @@ The core, assurance, and HTI 0.8 suites cover:
 
 GitHub Actions runs these checks on Python 3.10, 3.11, and 3.12, plus linting, dependency auditing, evidence-integrity checks, environment capture, and SHA-256 evidence manifests.
 
-## Required HTI 0.8 empirical experiment
+## HTI 0.8 empirical experiment protocol
 
-Before any statement that 0.8 improves predictive performance, use identical frozen event-level splits and seeds to compare at least:
+The completed Phase 3 experiment used identical frozen event-level splits and seeds to compare:
 
 1. constant velocity;
 2. filter/direct extrapolation;
@@ -174,15 +214,21 @@ Before any statement that 0.8 improves predictive performance, use identical fro
 7. core + topology; and
 8. combined HTI 0.8.
 
-The experiment must include component ablations for slip/orientation, curvature/turn rate, zigzag, swept area, deformation, and mode evidence; topology failure analysis; entropy-concentration versus empirical error/selective-risk deciles; 95% Bayesian credible-region coverage/size; conformal coverage/size; and robustness to endpoint noise, endpoint label swaps, missing frames, timing shifts, and abrupt turns.
+The current evidence includes the eight comparison variants, topology failure
+analysis, entropy/selective-risk outputs, credible regions, and conformal outputs.
+Fine-grained component ablations for slip/orientation, curvature/turn rate,
+zigzag, swept area, deformation, and mode evidence, plus robustness to endpoint
+noise, endpoint label swaps, missing frames, timing shifts, and abrupt turns,
+remain future work. Any new predictive experiment requires a new development-only
+design and pre-registration; it may not revise this frozen result.
 
 See [docs/TOPOLOGICAL_ENTROPY_VALIDATION.md](docs/TOPOLOGICAL_ENTROPY_VALIDATION.md).
 
 ## Remaining scientific work before a strong external validation claim
 
-- Generate multiple independent frozen benchmark seeds.
+- Independently review the frozen Phase 3 evidence and reproduction contract.
+- Design any future scenario-support changes using development-only evidence, then freeze a new protocol before viewing new final-test outcomes.
 - Improve scenario support so train, calibration/validation, and test sets cover materially more of the nominal class space while preserving trajectory isolation.
-- Run the frozen HTI 0.8 baseline/ablation experiment.
 - Add scenario-shift tests across sensor noise, endpoint quality, atmospheric assumptions, vehicle parameters, maneuver regimes, and starting conditions.
 - Evaluate probability calibration, credible-region coverage, conformal prediction-set coverage, and selective risk under distribution shift.
 - Validate against independent public civil telemetry or an independently configured high-fidelity simulator.
@@ -193,4 +239,9 @@ See [docs/EXTERNAL_VALIDATION_PROTOCOL.md](docs/EXTERNAL_VALIDATION_PROTOCOL.md)
 
 ## Bottom line
 
-The current system is a credible **research prototype with a stronger assurance, evidence, and structural/topological architecture**. HTI 0.8 is suitable for technical evaluation, collaboration discussions, and the next controlled validation phase. It is not yet evidence-complete for operational, safety-critical, certified, or externally validated use.
+The current system is a credible **research prototype with a stronger assurance,
+evidence, and structural/topological architecture**. The frozen Phase 3 result
+does not demonstrate that Full HTI 0.8 improves prediction over Core HTI. The
+system remains suitable for technical evaluation, falsification-driven research,
+and independently reviewed follow-up work. It is not evidence-complete for
+operational, safety-critical, certified, or externally validated use.
