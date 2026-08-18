@@ -25,16 +25,26 @@
     "selection_data": "validation_only",
     "candidate_structural_weights": [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.0],
     "selection_metric": "negative_log_likelihood",
-    "tie_break": "smaller_structural_weight"
+    "tie_break": "smaller_structural_weight",
+    "composition_order": [
+      "core_hti_plus_raw_structural_branch_via_validation_selected_log_pool",
+      "apply_frozen_topology_cell_prior"
+    ]
   },
   "bundle_contract": {
     "require_validation_selection_sha256": true,
+    "require_reproducible_structural_fusion": true,
+    "require_reproducible_topology_application": true,
     "require_reproducible_combined_probabilities": true,
+    "require_raw_structural_branch_probabilities": true,
+    "require_topology_cell_prior": true,
+    "require_execution_config_sha256": true,
     "require_topology_definition_sha256": true,
     "require_topology_coefficients_sha256": true,
     "require_ordered_cell_ids_per_variant": true,
     "require_cell_partition_sha256": true,
-    "require_conformal_calibration_sha256_when_present": true
+    "require_conformal_calibration_sha256_when_present": true,
+    "require_model_artifact_sha256_for_learned_variants": true
   },
   "metrics": {
     "top_k": [1, 3, 5],
@@ -62,7 +72,8 @@
     "definitions_frozen_before_test": true,
     "coefficients_frozen_before_test": true,
     "report_probability_mass_changed": true,
-    "report_true_path_suppression_failures": true
+    "report_true_path_suppression_failures": true,
+    "combined_variant_must_include_topology": true
   },
   "scientific_note": "Passing implementation tests does not establish predictive improvement. Final claims require the frozen event-level comparison and independent validation evidence."
 }
