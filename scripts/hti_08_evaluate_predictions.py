@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Evaluate frozen HTI 0.8 probability bundles on complete trajectory events.
 
-The evaluator consumes already-produced probabilities. It does not train or tune
-on final-test data. Fusion weights, topology coefficients, calibration values,
-and other fitted quantities must be selected outside the final test set.
+The evaluator consumes already-produced probabilities. It never trains or tunes
+on final-test data. It independently reconstructs every fused variant from the
+frozen bundle inputs before reporting metrics.
 """
 
 from __future__ import annotations
@@ -40,6 +40,11 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _sha256_json(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _source_commit() -> str:
@@ -122,38 +127,64 @@ def _apply_topology_cube(
     topology_prior: np.ndarray,
     *,
     strength: float,
+    floor: float,
 ) -> np.ndarray:
     if not np.isfinite(strength) or strength < 0.0:
         raise ValueError("topology prior strength must be finite and non-negative")
+    if not np.isfinite(floor) or floor <= 0.0:
+        raise ValueError("topology prior floor must be finite and positive")
     if probabilities.shape != topology_prior.shape:
         raise ValueError("topology prior must match probability cube shape")
     output = np.empty_like(probabilities, dtype=float)
     for horizon in range(probabilities.shape[1]):
-        prior = np.power(np.clip(topology_prior[:, horizon, :], 1e-12, 1.0), strength)
-        output[:, horizon, :] = apply_cell_prior(probabilities[:, horizon, :], prior)
+        output[:, horizon, :] = apply_cell_prior(
+            probabilities[:, horizon, :],
+            np.maximum(topology_prior[:, horizon, :], float(floor)),
+            strength=float(strength),
+        )
     return output
 
 
+def _synthetic_cube(labels: np.ndarray, classes: int, correct_mass: float) -> np.ndarray:
+    samples, horizons = labels.shape
+    cube = np.full(
+        (samples, horizons, classes),
+        (1.0 - correct_mass) / (classes - 1),
+        dtype=float,
+    )
+    for horizon in range(horizons):
+        cube[np.arange(samples), horizon, labels[:, horizon]] = correct_mass
+    return cube
+
+
 def _self_test_bundle(
-    *, execution_config_sha256: str, topology_strength: float
+    *,
+    protocol_sha256: str,
+    execution_config_sha256: str,
+    execution: dict[str, object],
 ) -> dict[str, np.ndarray]:
     samples = 120
     horizons = 3
     classes = 4
-    labels = np.tile(np.arange(classes, dtype=int), samples // classes)
-    labels = np.column_stack([labels, np.roll(labels, 1), np.roll(labels, 2)])
+    base = np.tile(np.arange(classes, dtype=int), samples // classes)
+    labels = np.column_stack([base, np.roll(base, 1), np.roll(base, 2)])
     test_event_ids = np.arange(300, 312, dtype=int)
     event_ids = np.repeat(test_event_ids, 10)
+    candidates = np.linspace(0.0, 1.0, 21)
 
-    def distributions(correct_mass: float) -> np.ndarray:
-        cube = np.full((samples, horizons, classes), (1.0 - correct_mass) / (classes - 1))
-        for horizon in range(horizons):
-            cube[np.arange(samples), horizon, labels[:, horizon]] = correct_mass
-        return cube
+    physics = _synthetic_cube(labels, classes, 0.52)
+    transformer = _synthetic_cube(labels, classes, 0.62)
+    core_weights = np.full(horizons, candidates[6], dtype=float)
+    core = np.empty_like(transformer)
+    for horizon, weight in enumerate(core_weights):
+        core[:, horizon, :] = log_linear_pool(
+            transformer[:, horizon, :],
+            physics[:, horizon, :],
+            structural_weight=float(weight),
+        )
 
-    core = distributions(0.58)
-    raw_structural = distributions(0.72)
-    structural_weights = np.full(horizons, 0.50, dtype=float)
+    raw_structural = _synthetic_cube(labels, classes, 0.72)
+    structural_weights = np.full(horizons, candidates[10], dtype=float)
     core_plus_structural = np.empty_like(core)
     for horizon, weight in enumerate(structural_weights):
         core_plus_structural[:, horizon, :] = log_linear_pool(
@@ -161,19 +192,25 @@ def _self_test_bundle(
             raw_structural[:, horizon, :],
             structural_weight=float(weight),
         )
-    topology_prior = distributions(0.62)
+
+    topology_prior = _synthetic_cube(labels, classes, 0.62)
+    topology_cfg = execution["topology_branch"]
+    topology_strength = float(topology_cfg["cell_prior_strength"])
+    topology_floor = float(topology_cfg["cell_prior_floor"])
     core_plus_topology = _apply_topology_cube(
-        core, topology_prior, strength=topology_strength
+        core, topology_prior, strength=topology_strength, floor=topology_floor
     )
     combined = _apply_topology_cube(
-        core_plus_structural, topology_prior, strength=topology_strength
+        core_plus_structural,
+        topology_prior,
+        strength=topology_strength,
+        floor=topology_floor,
     )
-
     variants = {
-        "constant_velocity": distributions(0.35),
-        "filter_direct": distributions(0.40),
-        "physics_only": distributions(0.45),
-        "learned_only": distributions(0.50),
+        "constant_velocity": _synthetic_cube(labels, classes, 0.35),
+        "filter_direct": _synthetic_cube(labels, classes, 0.40),
+        "physics_only": physics,
+        "learned_only": _synthetic_cube(labels, classes, 0.48),
         "core_hti": core,
         "core_plus_structural": core_plus_structural,
         "core_plus_topology": core_plus_topology,
@@ -182,11 +219,18 @@ def _self_test_bundle(
 
     cell_ids = np.array([f"cell-{index}" for index in range(classes)])
     validation_digest = hashlib.sha256(b"synthetic-validation-selection").hexdigest()
-    topology_definition_digest = hashlib.sha256(b"synthetic-topology-definition").hexdigest()
-    topology_coefficients_digest = hashlib.sha256(b"synthetic-topology-coefficients").hexdigest()
     learned_digest = hashlib.sha256(b"synthetic-learned-model").hexdigest()
-    core_digest = hashlib.sha256(b"synthetic-core-model").hexdigest()
+    core_digest = hashlib.sha256(b"synthetic-core-transformer-model").hexdigest()
     structural_digest = hashlib.sha256(b"synthetic-structural-model").hexdigest()
+    topology_definition = {
+        "kind": topology_cfg["kind"],
+        "history_direction_source": topology_cfg["history_direction_source"],
+        "path_distance": topology_cfg["path_distance"],
+        "path_reweighting": "hti.phase3_models.history_consistency_weights",
+        "cell_prior_application": "hti.fusion.apply_cell_prior",
+    }
+    topology_definition_digest = _sha256_json(topology_definition)
+    topology_coefficients_digest = _sha256_json(topology_cfg)
     partition_digest = _cell_partition_sha256(cell_ids)
 
     bundle: dict[str, np.ndarray] = {
@@ -196,10 +240,12 @@ def _self_test_bundle(
         "train_event_ids": np.arange(100, 120, dtype=int),
         "validation_event_ids": np.arange(200, 205, dtype=int),
         "test_event_ids": test_event_ids,
-        "orientation_source": np.array(["synthetic_smoke"]),
+        "orientation_source": np.array([str(execution["structural_branch"]["orientation_source"])]),
         "fusion_selection_data": np.array(["validation_only"]),
+        "core_physics_weights": core_weights,
         "fusion_structural_weights": structural_weights,
         "validation_selection_sha256": np.array([validation_digest]),
+        "protocol_sha256": np.array([protocol_sha256]),
         "execution_config_sha256": np.array([execution_config_sha256]),
         "topology_definition_sha256": np.array([topology_definition_digest]),
         "topology_coefficients_sha256": np.array([topology_coefficients_digest]),
@@ -207,6 +253,7 @@ def _self_test_bundle(
         "model_sha256__learned_only": np.array([learned_digest]),
         "model_sha256__core_hti": np.array([core_digest]),
         "model_sha256__structural_branch": np.array([structural_digest]),
+        "core_transformer_probabilities": transformer,
         "structural_branch_probabilities": raw_structural,
         "topology_cell_prior": topology_prior,
         "topology_true_path_suppressed": np.zeros((samples, horizons), dtype=np.uint8),
@@ -224,19 +271,41 @@ def _load_bundle(path: Path) -> dict[str, np.ndarray]:
         return {name: np.asarray(archive[name]) for name in archive.files}
 
 
+def _validate_fusion_weights(
+    values: np.ndarray | None,
+    *,
+    candidates: np.ndarray,
+    field_name: str,
+) -> np.ndarray:
+    if values is None or (values < 0.0).any() or (values > 1.0).any():
+        raise ValueError(f"{field_name} must contain frozen values in [0, 1]")
+    if any(
+        not np.any(np.isclose(weight, candidates, rtol=0.0, atol=1e-12))
+        for weight in values
+    ):
+        raise ValueError(f"{field_name} must come from the frozen candidate grid")
+    return values
+
+
 def _validate_contract(
     bundle: dict[str, np.ndarray],
     config: dict[str, object],
     execution: dict[str, object],
+    *,
+    protocol_sha256: str,
     execution_config_sha256: str,
     labels: np.ndarray,
     event_ids: np.ndarray,
     variants: dict[str, np.ndarray],
 ) -> dict[str, object]:
     seed = int(_scalar(bundle, "seed"))
-    configured_seeds = {int(value) for value in config["seeds"]}
-    if seed not in configured_seeds:
+    if seed not in {int(value) for value in config["seeds"]}:
         raise ValueError(f"seed {seed} is not present in the frozen protocol")
+
+    if _sha256_value(bundle, "protocol_sha256") != protocol_sha256:
+        raise ValueError("protocol_sha256 does not match the supplied frozen protocol")
+    if _sha256_value(bundle, "execution_config_sha256") != execution_config_sha256:
+        raise ValueError("execution_config_sha256 does not match the supplied frozen execution config")
 
     train_ids = np.asarray(bundle.get("train_event_ids", [])).reshape(-1)
     validation_ids = np.asarray(bundle.get("validation_event_ids", [])).reshape(-1)
@@ -268,27 +337,34 @@ def _validate_contract(
     if partition_sha256 != _cell_partition_sha256(reference_cells):
         raise ValueError("cell_partition_sha256 does not match the ordered cell IDs")
 
-    bundle_execution_sha256 = _sha256_value(bundle, "execution_config_sha256")
-    if bundle_execution_sha256 != execution_config_sha256:
-        raise ValueError("execution_config_sha256 does not match the supplied frozen execution config")
-
     if str(_scalar(bundle, "fusion_selection_data")) != "validation_only":
         raise ValueError("fusion_selection_data must be 'validation_only'")
     validation_sha256 = _sha256_value(bundle, "validation_selection_sha256")
-    topology_definition_sha256 = _sha256_value(bundle, "topology_definition_sha256")
-    topology_coefficients_sha256 = _sha256_value(bundle, "topology_coefficients_sha256")
-    model_sha256 = {
-        "learned_only": _sha256_value(bundle, "model_sha256__learned_only"),
-        "core_hti": _sha256_value(bundle, "model_sha256__core_hti"),
-        "structural_branch": _sha256_value(bundle, "model_sha256__structural_branch"),
-    }
-
-    weights = _horizon_values(bundle, "fusion_structural_weights", labels.shape[1])
-    if weights is None or (weights < 0.0).any() or (weights > 1.0).any():
-        raise ValueError("fusion_structural_weights must contain frozen values in [0, 1]")
     candidates = np.asarray(config["fusion_policy"]["candidate_structural_weights"], dtype=float)
-    if any(not np.any(np.isclose(weight, candidates, rtol=0.0, atol=1e-12)) for weight in weights):
-        raise ValueError("fusion_structural_weights must come from the frozen candidate grid")
+    core_weights = _validate_fusion_weights(
+        _horizon_values(bundle, "core_physics_weights", labels.shape[1]),
+        candidates=candidates,
+        field_name="core_physics_weights",
+    )
+    structural_weights = _validate_fusion_weights(
+        _horizon_values(bundle, "fusion_structural_weights", labels.shape[1]),
+        candidates=candidates,
+        field_name="fusion_structural_weights",
+    )
+
+    if "core_transformer_probabilities" not in bundle:
+        raise ValueError("bundle is missing core_transformer_probabilities")
+    transformer = _as_probability_cube(bundle["core_transformer_probabilities"], labels.shape[1])
+    if transformer.shape != variants["core_hti"].shape:
+        raise ValueError("core_transformer_probabilities must match the core probability cube")
+    for horizon, weight in enumerate(core_weights):
+        reproduced_core = log_linear_pool(
+            transformer[:, horizon, :],
+            variants["physics_only"][:, horizon, :],
+            structural_weight=float(weight),
+        )
+        if not np.allclose(reproduced_core, variants["core_hti"][:, horizon, :], rtol=1e-10, atol=1e-12):
+            raise ValueError("core_hti does not reproduce from Transformer, physics-only, and frozen core weights")
 
     if "structural_branch_probabilities" not in bundle:
         raise ValueError("bundle is missing raw structural_branch_probabilities")
@@ -297,8 +373,7 @@ def _validate_contract(
     )
     if raw_structural.shape != variants["core_hti"].shape:
         raise ValueError("structural_branch_probabilities must match the core probability cube")
-
-    for horizon, weight in enumerate(weights):
+    for horizon, weight in enumerate(structural_weights):
         reproduced_structural = log_linear_pool(
             variants["core_hti"][:, horizon, :],
             raw_structural[:, horizon, :],
@@ -317,41 +392,59 @@ def _validate_contract(
     topology_prior = _as_probability_cube(bundle["topology_cell_prior"], labels.shape[1])
     if topology_prior.shape != variants["core_hti"].shape:
         raise ValueError("topology_cell_prior must match the core probability cube")
-    topology_strength = float(execution["topology_branch"]["cell_prior_strength"])
+    topology_cfg = execution["topology_branch"]
+    topology_strength = float(topology_cfg["cell_prior_strength"])
+    topology_floor = float(topology_cfg["cell_prior_floor"])
     reproduced_topology = _apply_topology_cube(
-        variants["core_hti"], topology_prior, strength=topology_strength
+        variants["core_hti"],
+        topology_prior,
+        strength=topology_strength,
+        floor=topology_floor,
     )
-    if not np.allclose(
-        reproduced_topology,
-        variants["core_plus_topology"],
-        rtol=1e-10,
-        atol=1e-12,
-    ):
+    if not np.allclose(reproduced_topology, variants["core_plus_topology"], rtol=1e-10, atol=1e-12):
         raise ValueError("core_plus_topology does not reproduce from core and frozen topology prior")
     reproduced_combined = _apply_topology_cube(
-        variants["core_plus_structural"], topology_prior, strength=topology_strength
+        variants["core_plus_structural"],
+        topology_prior,
+        strength=topology_strength,
+        floor=topology_floor,
     )
-    if not np.allclose(
-        reproduced_combined,
-        variants["hti_08_combined"],
-        rtol=1e-10,
-        atol=1e-12,
-    ):
+    if not np.allclose(reproduced_combined, variants["hti_08_combined"], rtol=1e-10, atol=1e-12):
         raise ValueError("hti_08_combined does not reproduce from structural fusion plus frozen topology prior")
 
+    orientation_source = str(_scalar(bundle, "orientation_source"))
+    expected_orientation = str(execution["structural_branch"]["orientation_source"])
+    if orientation_source != expected_orientation:
+        raise ValueError("orientation_source does not match the frozen structural observation source")
+
+    expected_topology_definition = _sha256_json(
+        {
+            "kind": topology_cfg["kind"],
+            "history_direction_source": topology_cfg["history_direction_source"],
+            "path_distance": topology_cfg["path_distance"],
+            "path_reweighting": "hti.phase3_models.history_consistency_weights",
+            "cell_prior_application": "hti.fusion.apply_cell_prior",
+        }
+    )
+    topology_definition_sha256 = _sha256_value(bundle, "topology_definition_sha256")
+    if topology_definition_sha256 != expected_topology_definition:
+        raise ValueError("topology_definition_sha256 does not match the frozen topology definition")
+    topology_coefficients_sha256 = _sha256_value(bundle, "topology_coefficients_sha256")
+    if topology_coefficients_sha256 != _sha256_json(topology_cfg):
+        raise ValueError("topology_coefficients_sha256 does not match frozen topology coefficients")
+
+    model_sha256 = {
+        "learned_only": _sha256_value(bundle, "model_sha256__learned_only"),
+        "core_hti": _sha256_value(bundle, "model_sha256__core_hti"),
+        "structural_branch": _sha256_value(bundle, "model_sha256__structural_branch"),
+    }
     for name in required_variants:
-        qhat_key = f"conformal_qhat__{name}"
-        if qhat_key in bundle:
+        if f"conformal_qhat__{name}" in bundle:
             _sha256_value(bundle, f"conformal_calibration_sha256__{name}")
 
-    orientation_source = str(_scalar(bundle, "orientation_source"))
-    if not orientation_source.strip():
-        raise ValueError("orientation_source must be non-empty")
-
-    topology_policy = config.get("topology_policy", {})
-    require_suppression = bool(topology_policy.get("report_true_path_suppression_failures", False))
-    if require_suppression and "topology_true_path_suppressed" not in bundle:
-        raise ValueError("frozen topology policy requires topology_true_path_suppressed evidence")
+    if bool(config["topology_policy"].get("report_true_path_suppression_failures", False)):
+        if "topology_true_path_suppressed" not in bundle:
+            raise ValueError("frozen topology policy requires topology_true_path_suppressed evidence")
     if "topology_true_path_suppressed" in bundle:
         suppressed = np.asarray(bundle["topology_true_path_suppressed"])
         if suppressed.shape != labels.shape:
@@ -360,14 +453,17 @@ def _validate_contract(
     return {
         "seed": seed,
         "orientation_source": orientation_source,
+        "protocol_sha256": protocol_sha256,
+        "execution_config_sha256": execution_config_sha256,
         "cell_partition_sha256": partition_sha256,
-        "execution_config_sha256": bundle_execution_sha256,
         "validation_selection_sha256": validation_sha256,
         "topology_definition_sha256": topology_definition_sha256,
         "topology_coefficients_sha256": topology_coefficients_sha256,
         "model_sha256": model_sha256,
-        "fusion_structural_weights": [float(value) for value in weights],
+        "core_physics_weights": [float(value) for value in core_weights],
+        "fusion_structural_weights": [float(value) for value in structural_weights],
         "topology_cell_prior_strength": topology_strength,
+        "topology_cell_prior_floor": topology_floor,
         "split_event_counts": {
             "train": int(len(np.unique(train_ids))),
             "validation": int(len(np.unique(validation_ids))),
@@ -375,6 +471,7 @@ def _validate_contract(
         },
         "required_variants_present": True,
         "event_splits_disjoint": True,
+        "core_fusion_reproducible": True,
         "structural_fusion_reproducible": True,
         "topology_application_reproducible": True,
         "combined_reproducible": True,
@@ -392,12 +489,12 @@ def _topology_stats(
         core_h = core[:, horizon, :]
         topology_h = topology[:, horizon, :]
         y = labels[:, horizon]
-        tv = 0.5 * np.sum(np.abs(topology_h - core_h), axis=1)
+        total_variation = 0.5 * np.sum(np.abs(topology_h - core_h), axis=1)
         true_delta = topology_h[np.arange(len(y)), y] - core_h[np.arange(len(y)), y]
         record: dict[str, float | int] = {
-            "mean_total_variation": float(np.mean(tv)),
-            "median_total_variation": float(np.median(tv)),
-            "max_total_variation": float(np.max(tv)),
+            "mean_total_variation": float(np.mean(total_variation)),
+            "median_total_variation": float(np.median(total_variation)),
+            "max_total_variation": float(np.max(total_variation)),
             "mean_true_cell_probability_delta": float(np.mean(true_delta)),
             "fraction_true_cell_probability_decreased": float(np.mean(true_delta < 0.0)),
         }
@@ -414,6 +511,7 @@ def evaluate(
     config: dict[str, object],
     execution: dict[str, object],
     *,
+    protocol_sha256: str,
     execution_config_sha256: str,
 ) -> dict[str, object]:
     if "labels" not in bundle or "event_ids" not in bundle:
@@ -445,10 +543,11 @@ def evaluate(
         bundle,
         config,
         execution,
-        execution_config_sha256,
-        labels,
-        event_ids,
-        variants,
+        protocol_sha256=protocol_sha256,
+        execution_config_sha256=execution_config_sha256,
+        labels=labels,
+        event_ids=event_ids,
+        variants=variants,
     )
     report: dict[str, object] = {
         "schema": "hti.ablation-report.v0.8",
@@ -491,39 +590,37 @@ def evaluate(
         variant_report[name] = horizon_report
     report["variants"] = variant_report
 
-    if "core_hti" in variants and "hti_08_combined" in variants:
-        comparisons: dict[str, object] = {}
-        for index, horizon in enumerate(horizons):
-            core = variants["core_hti"][:, index, :]
-            combined = variants["hti_08_combined"][:, index, :]
-            y = labels[:, index]
-            comparisons[str(horizon)] = {
-                "nll_delta_combined_minus_core": event_bootstrap_delta(
-                    nll_contributions(combined, y),
-                    nll_contributions(core, y),
-                    event_ids,
-                    iterations=bootstrap_iterations,
-                    seed=20260818 + index,
-                    lower_is_better=True,
-                )
-            }
-        report["paired_core_vs_combined"] = comparisons
-
-    if "core_hti" in variants and "core_plus_topology" in variants:
-        suppressed = bundle.get("topology_true_path_suppressed")
-        report["topology_effect"] = {
-            str(horizon): values
-            for horizon, values in zip(
-                horizons,
-                _topology_stats(
-                    variants["core_hti"],
-                    variants["core_plus_topology"],
-                    labels,
-                    np.asarray(suppressed) if suppressed is not None else None,
-                ),
-                strict=True,
+    comparisons: dict[str, object] = {}
+    for index, horizon in enumerate(horizons):
+        core = variants["core_hti"][:, index, :]
+        combined = variants["hti_08_combined"][:, index, :]
+        y = labels[:, index]
+        comparisons[str(horizon)] = {
+            "nll_delta_combined_minus_core": event_bootstrap_delta(
+                nll_contributions(combined, y),
+                nll_contributions(core, y),
+                event_ids,
+                iterations=bootstrap_iterations,
+                seed=20260818 + index,
+                lower_is_better=True,
             )
         }
+    report["paired_core_vs_combined"] = comparisons
+
+    suppressed = bundle.get("topology_true_path_suppressed")
+    report["topology_effect"] = {
+        str(horizon): values
+        for horizon, values in zip(
+            horizons,
+            _topology_stats(
+                variants["core_hti"],
+                variants["core_plus_topology"],
+                labels,
+                np.asarray(suppressed) if suppressed is not None else None,
+            ),
+            strict=True,
+        )
+    }
     return report
 
 
@@ -546,12 +643,13 @@ def main() -> int:
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     execution = json.loads(args.execution_config.read_text(encoding="utf-8"))
+    protocol_sha256 = _sha256_file(args.config)
     execution_sha256 = _sha256_file(args.execution_config)
-    topology_strength = float(execution["topology_branch"]["cell_prior_strength"])
     bundle = (
         _self_test_bundle(
+            protocol_sha256=protocol_sha256,
             execution_config_sha256=execution_sha256,
-            topology_strength=topology_strength,
+            execution=execution,
         )
         if args.self_test
         else _load_bundle(args.bundle)
@@ -560,10 +658,11 @@ def main() -> int:
         bundle,
         config,
         execution,
+        protocol_sha256=protocol_sha256,
         execution_config_sha256=execution_sha256,
     )
     report["source_commit"] = _source_commit()
-    report["protocol_sha256"] = _sha256_file(args.config)
+    report["protocol_sha256"] = protocol_sha256
     report["execution_config_sha256"] = execution_sha256
     report["bundle_sha256"] = "self-test-generated" if args.self_test else _sha256_file(args.bundle)
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
