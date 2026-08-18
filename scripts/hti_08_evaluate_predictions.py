@@ -245,6 +245,7 @@ def _self_test_bundle(
         "core_physics_weights": core_weights,
         "fusion_structural_weights": structural_weights,
         "validation_selection_sha256": np.array([validation_digest]),
+        "source_commit": np.array(["0" * 40]),
         "protocol_sha256": np.array([protocol_sha256]),
         "execution_config_sha256": np.array([execution_config_sha256]),
         "topology_definition_sha256": np.array([topology_definition_digest]),
@@ -325,6 +326,12 @@ def _validate_contract(
     seed = int(_scalar(bundle, "seed"))
     if seed not in {int(value) for value in config["seeds"]}:
         raise ValueError(f"seed {seed} is not present in the frozen protocol")
+
+    bundle_source_commit = str(_scalar(bundle, "source_commit")).lower()
+    if len(bundle_source_commit) != 40 or any(
+        character not in "0123456789abcdef" for character in bundle_source_commit
+    ):
+        raise ValueError("source_commit must identify the immutable bundle-producing commit")
 
     if _sha256_value(bundle, "protocol_sha256") != protocol_sha256:
         raise ValueError("protocol_sha256 does not match the supplied frozen protocol")
@@ -483,6 +490,7 @@ def _validate_contract(
 
     return {
         "seed": seed,
+        "bundle_source_commit": bundle_source_commit,
         "orientation_source": orientation_source,
         "protocol_sha256": protocol_sha256,
         "execution_config_sha256": execution_config_sha256,
@@ -692,7 +700,10 @@ def main() -> int:
         protocol_sha256=protocol_sha256,
         execution_config_sha256=execution_sha256,
     )
-    report["source_commit"] = _source_commit()
+    bundle_source_commit = str(report["contract"]["bundle_source_commit"])
+    report["source_commit"] = bundle_source_commit
+    report["bundle_source_commit"] = bundle_source_commit
+    report["evaluator_source_commit"] = _source_commit()
     report["protocol_sha256"] = protocol_sha256
     report["execution_config_sha256"] = execution_sha256
     report["bundle_sha256"] = "self-test-generated" if args.self_test else _sha256_file(args.bundle)

@@ -233,6 +233,12 @@ class FusionBenchmarkingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.evaluate_bundle(bundle)
 
+    def test_frozen_evaluator_requires_bundle_source_commit(self):
+        bundle = self.self_test_bundle()
+        del bundle["source_commit"]
+        with self.assertRaisesRegex(ValueError, "source_commit"):
+            self.evaluate_bundle(bundle)
+
     def test_frozen_evaluator_rejects_split_leakage(self):
         bundle = self.self_test_bundle()
         bundle["validation_event_ids"] = np.array([100, 200, 201], dtype=int)
