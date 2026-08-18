@@ -1,9 +1,9 @@
 """Low-capacity Phase 3 model helpers for the frozen HTI 0.8 ablation study.
 
 These utilities support internal synthetic evaluation. They deliberately keep
-structural evidence and topology/history reweighting simple, deterministic, and
-separable from the high-capacity core model so their contribution can be
-measured rather than assumed.
+measurement-only and structural evidence simple, deterministic, and separable
+from the high-capacity core model so their contribution can be measured rather
+than assumed.
 """
 
 from __future__ import annotations
@@ -12,8 +12,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from alien_exit_cell_predictor_v6_3 import q_to_R
+
 from .fusion import multiclass_nll
-from .topological_entropy import StructuralMotionFeatures
+from .phase3 import Phase3Event
+from .topological_entropy import (
+    EndpointObservation,
+    StructuralMotionFeatures,
+    estimate_structural_motion,
+)
 
 MODE_ORDER = (
     "straight",
@@ -58,7 +65,7 @@ def _softmax(logits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
 
 @dataclass(frozen=True)
 class RidgeProbabilisticClassifier:
-    """Deterministic ridge classifier used only for structural-feature ablation."""
+    """Deterministic low-capacity probabilistic ridge classifier."""
 
     mean: np.ndarray
     scale: np.ndarray
@@ -118,7 +125,7 @@ def select_temperature(
     validation_labels: np.ndarray,
     candidates: np.ndarray,
 ) -> tuple[float, float]:
-    """Select structural temperature from validation NLL only."""
+    """Select a predeclared temperature using validation NLL only."""
 
     values = np.unique(np.asarray(candidates, dtype=float).reshape(-1))
     if values.size == 0 or not np.isfinite(values).all() or (values <= 0).any():
@@ -138,7 +145,7 @@ def select_temperature(
 
 
 def structural_feature_vector(features: StructuralMotionFeatures) -> np.ndarray:
-    """Convert source-derived structural descriptors into a fixed vector."""
+    """Convert the frozen structural feature set into one deterministic vector."""
 
     modes = features.mode_probabilities
     return np.asarray(
@@ -151,10 +158,81 @@ def structural_feature_vector(features: StructuralMotionFeatures) -> np.ndarray:
             features.zigzag_score,
             features.zigzag_bias,
             features.body_length_rate,
+            *features.body_direction.tolist(),
+            *features.travel_direction.tolist(),
             *(float(modes.get(name, 0.0)) for name in MODE_ORDER),
         ],
         dtype=float,
     )
+
+
+def measurement_history_vector(
+    event: Phase3Event,
+    frame: int,
+    *,
+    history_points: int,
+    history_stride_frames: int,
+) -> np.ndarray:
+    """Flatten causal noisy position/velocity history for the learned-only baseline."""
+
+    points = int(history_points)
+    stride = int(history_stride_frames)
+    if points < 2 or stride < 1:
+        raise ValueError("measurement history requires at least two points and positive stride")
+    indices = int(frame) - np.arange(points - 1, -1, -1, dtype=int) * stride
+    if indices[0] < 0 or indices[-1] >= len(event.measurements):
+        raise ValueError("requested measurement history is not available")
+    history = np.asarray(event.measurements[indices], dtype=float)
+    if history.ndim != 2 or history.shape[1] != 6 or not np.isfinite(history).all():
+        raise ValueError("measurement history must contain finite position/velocity observations")
+    return history.reshape(-1)
+
+
+def noisy_truth_endpoint_structure(
+    event: Phase3Event,
+    frame: int,
+    *,
+    seed: int,
+    dt: float,
+    history_points: int,
+    body_length: float,
+    endpoint_noise_std: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build frozen structural features from synthetic noisy truth-attitude endpoints.
+
+    Noise is deterministically keyed by final seed, event identity, and source
+    frame, so calling the function in a different order cannot alter evidence.
+    The returned second vector is the structural travel direction used by the
+    topology branch.
+    """
+
+    points = int(history_points)
+    if points < 3:
+        raise ValueError("structural history requires at least three points")
+    if body_length <= 0 or endpoint_noise_std < 0:
+        raise ValueError("body length must be positive and endpoint noise non-negative")
+    start = int(frame) - points + 1
+    if start < 0 or int(frame) >= len(event.truth_states):
+        raise ValueError("requested structural history is not available")
+    indices = np.arange(start, int(frame) + 1, dtype=int)
+    states = np.asarray(event.truth_states[indices], dtype=float)
+    seed_sequence = np.random.SeedSequence(
+        [int(seed) & 0xFFFFFFFF, int(event.event_id) & 0xFFFFFFFF, int(frame) & 0xFFFFFFFF]
+    )
+    rng = np.random.default_rng(seed_sequence)
+    observations: list[EndpointObservation] = []
+    half = 0.5 * float(body_length)
+    for index, state in zip(indices, states, strict=True):
+        center = state[:3]
+        direction = q_to_R(state[6:10])[:, 0]
+        direction /= max(float(np.linalg.norm(direction)), 1e-12)
+        nose = center + half * direction + rng.normal(0.0, endpoint_noise_std, size=3)
+        rear = center - half * direction + rng.normal(0.0, endpoint_noise_std, size=3)
+        observations.append(
+            EndpointObservation(float(index) * float(dt), tuple(nose), tuple(rear))
+        )
+    structural = estimate_structural_motion(observations)
+    return structural_feature_vector(structural), structural.travel_direction.copy()
 
 
 def smoothed_cell_distribution(
@@ -184,7 +262,7 @@ def history_consistency_weights(
     travel_direction: np.ndarray,
     gamma: float,
 ) -> np.ndarray:
-    """Reweight paths by final-displacement agreement with recent travel direction."""
+    """Reweight paths by final-displacement agreement with recent structural travel direction."""
 
     weights = np.asarray(base_weights, dtype=float).reshape(-1)
     data = np.asarray(paths, dtype=float)
