@@ -31,10 +31,17 @@ jobs:
         run: >-
           python -m compileall -q hti scripts
           test_v63.py test_assurance.py test_topological_entropy.py
+          test_fusion_benchmarking.py
       - name: Unit verification
         run: >-
           python -m unittest -v
           test_v63.py test_assurance.py test_topological_entropy.py
+          test_fusion_benchmarking.py
+      - name: HTI 0.8 benchmark harness smoke
+        run: >-
+          python scripts/hti_08_evaluate_predictions.py
+          --self-test
+          --report hti08_ablation_smoke_report.json
       - name: Evidence integrity gate
         run: >-
           python scripts/evidence_gate.py
@@ -46,7 +53,9 @@ jobs:
           python scripts/build_evidence_manifest.py --out evidence_manifest.json
           python -m pip freeze > ci_environment.txt
       - name: Lint research modules
-        run: ruff check hti scripts test_assurance.py test_topological_entropy.py
+        run: >-
+          ruff check hti scripts
+          test_assurance.py test_topological_entropy.py test_fusion_benchmarking.py
       - name: Dependency audit
         run: pip-audit -r requirements.txt
       - name: Upload evidence bundle
@@ -57,5 +66,6 @@ jobs:
           path: |
             evidence_report.json
             evidence_manifest.json
+            hti08_ablation_smoke_report.json
             ci_environment.txt
           if-no-files-found: ignore
