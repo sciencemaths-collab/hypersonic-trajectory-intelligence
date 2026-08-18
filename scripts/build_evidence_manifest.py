@@ -29,6 +29,7 @@ DEFAULT_FILES = (
     "test_phase3_models.py",
     "scripts/hti_08_evaluate_predictions.py",
     "scripts/hti_08_phase3_pilot.py",
+    "scripts/hti_08_phase3_run_seed.py",
     "configs/hti_08_ablation_frozen.json",
     "configs/hti_08_phase3_execution_frozen.json",
     ".github/workflows/ci.yml",
