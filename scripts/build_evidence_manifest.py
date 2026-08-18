@@ -22,6 +22,7 @@ DEFAULT_FILES = (
     "hti/benchmarking.py",
     "hti/phase3.py",
     "hti/phase3_models.py",
+    "hti/phase3_runner.py",
     "test_assurance.py",
     "test_topological_entropy.py",
     "test_fusion_benchmarking.py",
