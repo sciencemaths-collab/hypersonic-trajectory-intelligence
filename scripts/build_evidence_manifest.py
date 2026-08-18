@@ -29,6 +29,7 @@ DEFAULT_FILES = (
     "benchmark_v64_maneuver_calibrated_metrics.json",
     "docs/HTI_0_8_ARCHITECTURE.md",
     "docs/TOPOLOGICAL_ENTROPY_VALIDATION.md",
+    "docs/HTI_0_8_PHASE2_BENCHMARKING.md",
 )
 
 
