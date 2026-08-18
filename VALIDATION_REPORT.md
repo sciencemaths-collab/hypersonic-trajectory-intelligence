@@ -1,95 +1,142 @@
-# Validation Report
+# Validation and Credibility Report
 
-## Scope
+## Status
 
-This bundle is simulation and research software. The audit covers numerical
-stability, causal data flow, coordinate-frame equations, target geometry,
-trajectory-isolated evaluation, calibration, UI integrity, and packaging. It is
-not certification for operational or safety-critical use.
+**Recorded evidence status: research prototype; not externally validated; not operationally certified.**
 
-## Physics and mathematics
+This report distinguishes code verification, numerical checks, model-performance evidence, and external validation. Passing a software test is not treated as proof that the physical model is valid for an operational environment.
 
-- State: ECEF position and velocity, body-to-ECEF quaternion, and body angular
-  velocity.
+## Intended use of this report
+
+The report supports independent technical review of the repository. It is not a flightworthiness, range-safety, weapons-control, navigation, or safety-critical certification.
+
+## Physics and mathematics currently implemented
+
+- State: ECEF position and velocity, body-to-ECEF quaternion, and body angular velocity.
 - Gravity: central gravity using `mu = 3.986004418e14 m^3/s^2`.
-- Rotating frame: fixed ECEF Earth-rate vector with Coriolis and centrifugal
-  acceleration.
+- Rotating frame: fixed ECEF Earth-rate vector with Coriolis and centrifugal acceleration.
 - Translation and rotation: midpoint RK2; quaternion normalized every step.
-- Aerodynamics: simplified drag with bounded Mach, Reynolds number, and drag
-  coefficient. Atmosphere uses a continuous ISA-style model through 86 km and a
-  documented exponential approximation above it.
-- Estimation: 13-state UKF with SPD covariance repair, innovation gating, and
-  dimensioned covariance matrices.
-- Six-face projection: 27 positive-weight UKF sigma hypotheses propagated through
-  deterministic 6-DOF rollouts. Side and gate masses use each hypothesis's first
-  linearly interpolated box crossing. The current control impulse is applied once;
-  unknown future control and hidden environment perturbations use zero-mean nominal
-assumptions. Unresolved mass is reported separately.
+- Aerodynamics: simplified drag with bounded Mach, Reynolds number, and drag coefficient.
+- Atmosphere: continuous ISA-style approximation through 86 km and an explicitly simplified exponential approximation above 86 km.
+- Estimation: 13-state UKF with SPD covariance repair, innovation gating, and dimensioned covariance matrices.
+- Probabilistic propagation: 27 sigma-point trajectories plus a transparent future-maneuver hypothesis mixture.
+- Boundary event: first linearly interpolated crossing of a local six-face volume; unresolved mass is reported separately.
+- Learning: causal multimodal Transformer using only observations/control context available through the prediction time.
+- Calibration: one temperature per horizon fitted using validation logits only; the test set is not used to select the temperature.
 
-The maneuver mixture supplements the no-future-maneuver sigma paths with 18
-signed body-axis impulse hypotheses at three causal event times. Their aggregate
-mass is `1 - (1 - p)^h`, where `p` is the configured per-step maneuver hazard and
-`h` is the selected lookahead. This is a transparent single-event approximation,
-not a learned operational intent model.
+## Independent assurance layer
 
-Transformer logits use one temperature per horizon selected solely from validation
-data. A non-identity temperature is accepted only when it improves validation
-negative log likelihood without worsening validation ECE; otherwise that horizon
-falls back to `T = 1`. Saved temperatures are reused for test evaluation and
-online probabilities; the test set is never used to fit or select calibration.
+Release 0.7 adds `hti.assurance`, which is deliberately downstream from the predictor. It provides:
 
-Hidden simulator gravity, density, temperature, and wind perturbations are not
-provided to the UKF, Transformer features, or prospective physics rollout.
+- normalized predictive entropy;
+- top-1 confidence and top-1/top-2 margin;
+- transparent abstention criteria; and
+- split-conformal prediction sets fitted on a separate calibration set.
 
-## Causality
+This layer does not convert an invalid physical model into a valid one. It reduces the risk of presenting a diffuse probability vector as a confident research prediction.
 
-- Transformer windows end at the prediction frame.
-- Changing future observations does not change the current input window.
-- Six-face prediction does not read future estimated or true position.
-- Future truth is used only to score predictions after they are generated.
-- Future random controls are not provided to the prospective rollout.
+## Causality checks
 
-## Final single-seed benchmark
+Existing automated tests verify that:
 
-Configuration: 48 disjoint trajectory groups, 4,224 windows, 18 epochs, CPU,
-and horizons of 0.4, 0.5, and 0.6 seconds.
+- Transformer windows end at the prediction frame;
+- changing future observations does not change the current input window;
+- six-face prediction does not read future estimated or true position;
+- future truth is used only for scoring after prediction;
+- future simulator perturbations are not injected into nominal prospective filter rollouts; and
+- saved NumPy traces are loaded with `allow_pickle=False`.
 
-| Horizon | Accuracy | Majority baseline | Balanced accuracy | Top-3 | ECE |
-|---|---:|---:|---:|---:|---:|
-| 0.4 s | 26.6% | 20.9% | 26.7% | 72.3% | 3.7% |
-| 0.5 s | 24.0% | 18.5% | 24.4% | 70.3% | 6.1% |
-| 0.6 s | 16.7% | 17.7% | 17.3% | 65.8% | 13.1% |
+## Recorded single-seed benchmark
 
-The validation-only calibration gate deployed temperatures `0.812`, `1.000`,
-and `0.901` for the three horizons. Identity calibration was retained at 0.5 s
-because no non-identity candidate improved validation NLL while preserving ECE.
+Configuration: 48 disjoint trajectory groups, 4,224 windows, 18 epochs, CPU, and horizons of 0.4, 0.5, and 0.6 seconds.
 
-The model does not pass the release gate because every horizon must beat its
-train-derived majority baseline and keep ECE below 10%. The UI reports this as
-`MODEL NOT RELEASE READY`.
+| Horizon | Accuracy | Majority baseline | Balanced accuracy | Top-3 | ECE | Original gate |
+|---|---:|---:|---:|---:|---:|---|
+| 0.4 s | 26.6% | 20.9% | 26.7% | 72.3% | 3.7% | Pass |
+| 0.5 s | 24.0% | 18.5% | 24.4% | 70.3% | 6.1% | Pass |
+| 0.6 s | 16.7% | 17.7% | 17.3% | 65.8% | 13.1% | Fail |
 
-## Automated verification
+Validation-only temperatures were `0.812`, `1.000`, and `0.901` for the three horizons. Identity calibration was retained at 0.5 s when a non-identity candidate did not satisfy the validation selection rule.
 
-- 18 unit tests pass.
-- Tests cover atmosphere monotonicity, central-gravity inverse-square behavior,
-  ECEF rotation directions, deterministic propagation, quaternion normalization,
-  SPD repair, hidden-jitter isolation, causal windows, future perturbation,
-  forward-face gate geometry, horizon validity, and calibration behavior.
-- Diversity stress tests report finite train/validation/test arrays and increased
-  target entropy after separating forward distance from transverse gate width.
-- Desktop and mobile layouts have no horizontal overflow. Plot title and legend
-  bounding boxes were checked and do not overlap.
+## Class-coverage audit
 
-## Remaining limitations
+A new audit found that aggregate accuracy was being reported over a narrow subset of the nominal 16 gate classes.
 
-- Synthetic trajectories only; no external or real sensor validation.
-- Simplified drag and upper-atmosphere models.
-- Quaternion uncertainty is represented in Euclidean UKF coordinates rather than
-  a manifold error-state formulation.
-- One final benchmark seed is insufficient for a production claim.
-- Unknown future maneuvers limit longer-horizon class predictability.
-- Geometric score is a normalized heuristic, not a calibrated posterior.
+| Horizon | Train classes | Validation classes | Test classes |
+|---|---:|---:|---:|
+| 0.4 s | 11/16 | 4/16 | 4/16 |
+| 0.5 s | 8/16 | 4/16 | 4/16 |
+| 0.6 s | 5/16 | 4/16 | 4/16 |
 
-Required next evidence for release: multiple independent seeds, frozen test sets,
-scenario-shift tests, ablations, uncertainty calibration on validation data, and
-domain-specific external validation.
+Consequences:
+
+1. The recorded benchmark does **not** demonstrate broad 16-class generalization.
+2. The 0.4 s and 0.5 s passes remain valid only for the recorded held-out distribution.
+3. New data-generation and external-validation work should increase scenario and class support without using final test outcomes to choose thresholds.
+
+The evidence gate now requires at least 50% class coverage per split/horizon before it will mark that scientific-readiness check as passing. This is a project research gate, not a NASA requirement.
+
+## Engineering-integrity gate
+
+`scripts/evidence_gate.py` checks:
+
+- configured horizon/class schema;
+- trajectory-group isolation;
+- minimum recorded trajectory-group count;
+- absence of workstation-specific absolute paths in versioned evidence;
+- presence and finiteness of required metrics; and
+- portable provenance metadata.
+
+These checks may fail CI because they concern repository integrity.
+
+## Scientific-readiness gate
+
+The same script separately reports:
+
+- accuracy above the recorded majority baseline at every configured horizon;
+- ECE at or below 10% at every configured horizon;
+- adequate held-out sample count;
+- at least 50% class coverage in train/validation/test for every horizon;
+- at least five independent benchmark seeds; and
+- independent external/domain validation.
+
+The current artifact is expected to fail this scientific tier. CI records the failure but does not relabel the prototype as broken software.
+
+## Automated verification inventory
+
+The existing core suite plus the new assurance suite cover:
+
+- atmosphere positivity/monotonicity;
+- central-gravity inverse-square behavior;
+- ECEF rotation directions;
+- deterministic propagation;
+- quaternion normalization;
+- SPD covariance repair;
+- hidden-jitter isolation;
+- causal windows and future-perturbation isolation;
+- virtual-box gate geometry;
+- horizon validity;
+- calibration behavior;
+- probability validation;
+- entropy and confidence-margin behavior;
+- abstention behavior; and
+- split-conformal set construction/coverage utilities.
+
+GitHub Actions runs these checks on Python 3.10, 3.11, and 3.12, plus linting and dependency auditing.
+
+## Remaining scientific work before a strong external validation claim
+
+- Generate multiple independent frozen benchmark seeds.
+- Improve scenario support so train, calibration/validation, and test sets cover materially more of the nominal class space while preserving trajectory isolation.
+- Add scenario-shift tests across sensor noise, atmospheric assumptions, vehicle parameters, maneuver regimes, and starting conditions.
+- Add sensitivity analysis and ablations that separate the contribution of physics rollout, UKF state estimation, Transformer features, maneuver mixture, and calibration.
+- Evaluate probability calibration, prediction-set coverage, and selective risk under distribution shift.
+- Validate against independent public civil telemetry or an independently configured high-fidelity simulator.
+- Replace the Euclidean quaternion covariance treatment with a manifold/error-state estimator if attitude uncertainty becomes a material part of the intended use.
+- Establish configuration-controlled benchmark manifests and independent review of the final evidence bundle.
+
+See [docs/EXTERNAL_VALIDATION_PROTOCOL.md](docs/EXTERNAL_VALIDATION_PROTOCOL.md).
+
+## Bottom line
+
+The current system is a credible **research prototype with a significantly improved assurance and evidence framework**. It is suitable for technical evaluation, collaboration discussions, and further validation work. It is not yet evidence-complete for operational, safety-critical, or certified use.

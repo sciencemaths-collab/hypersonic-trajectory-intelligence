@@ -1,196 +1,240 @@
 # Hypersonic Trajectory Intelligence
 
-![Development status](https://img.shields.io/badge/status-research%20%26%20development-e9b44c)
+[![Research CI](https://github.com/sciencemaths-collab/hypersonic-trajectory-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/sciencemaths-collab/hypersonic-trajectory-intelligence/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
+![Status](https://img.shields.io/badge/status-independent%20research-e9b44c)
 ![License](https://img.shields.io/badge/license-MIT-45c486)
 
-Physics-informed 6DOF tracking, maneuver inference, and uncertainty-aware
-flight-path prediction for high-speed aerospace research.
+**Physics-informed short-horizon trajectory inference with uncertainty-aware boundary prediction, independent assurance, and reproducible research evidence.**
 
 ![Hypersonic Trajectory Intelligence operations console](assets/project_promo.png)
 
-## Development Status
+## Research Release 0.7
 
-This project is an **independent research prototype under active development**.
-It demonstrates an integrated trajectory-inference workflow using synthetic
-simulation data. It is not certified, validated, or approved for operational,
-safety-critical, targeting, weapons-control, or flight-control use.
+This repository is an independent aerospace research prototype. It combines a rotating-Earth 6DOF simulator, nonlinear state estimation, probabilistic physics rollouts, a causal Transformer, calibration, and a new independent assurance/evidence layer.
 
-The project is not affiliated with, endorsed by, or developed on behalf of NASA,
-the United States Air Force, the United States Government, or any aerospace or
-defense organization.
+Release 0.7 does **not** claim operational readiness. Its purpose is to make the prototype technically reviewable: assumptions are explicit, validation weaknesses are surfaced instead of hidden, benchmark artifacts are portable, and CI checks numerical/engineering integrity across supported Python versions.
 
-The current full benchmark passes its accuracy and calibration requirements at
-0.4 and 0.5 seconds. The 0.6-second horizon does not pass. See
-[Validation](#validation) and [VALIDATION_REPORT.md](VALIDATION_REPORT.md).
+The project is not affiliated with, endorsed by, or developed on behalf of NASA, the United States Government, or any aerospace organization.
 
-## What It Does
+## What Changed in 0.7
 
-The system receives noisy simulated position and velocity measurements and
-estimates:
+- Added `hti.assurance`, an independent post-prediction layer for confidence, normalized entropy, top-class margin, abstention, and split-conformal prediction sets.
+- Added `scripts/evidence_gate.py`, which separates **engineering-integrity** checks from **scientific-readiness** checks.
+- Added Python 3.10–3.12 CI, source compilation, unit verification, linting, dependency auditing, and machine-readable evidence reports.
+- Sanitized the recorded benchmark artifact so it no longer contains workstation-specific absolute paths.
+- Added explicit benchmark provenance and a class-coverage audit.
+- Added requirements traceability, external-validation protocol, architecture, security policy, and a NASA-oriented research-readiness mapping.
+- Added a concise proposal brief for technical evaluation discussions.
 
-- the side of a local virtual safety volume that a vehicle will cross;
-- the gate cell on that boundary;
-- uncertainty over possible first-boundary crossings;
-- the effect of plausible future maneuver impulses; and
-- calibrated forward-face class probabilities at multiple prediction horizons.
+## Current Readiness
 
-The implementation combines:
+| Layer | Status | Meaning |
+|---|---|---|
+| Core physics/estimation implementation | Research prototype | Numerically tested on synthetic scenarios |
+| Software engineering integrity | CI-enforced | Compilation, unit tests, linting, dependency audit, evidence-schema checks |
+| Recorded benchmark | Mixed | 0.4 s and 0.5 s pass the original accuracy/calibration gates; 0.6 s does not |
+| Class coverage | Insufficient for broad generalization claims | Validation and test contain only 4 of 16 gate classes at each recorded horizon |
+| Multi-seed evidence | Incomplete | Current versioned benchmark records one seed |
+| External/domain validation | Not yet performed | Synthetic data only |
+| Operational/safety-critical use | **Not approved** | No certification or operational validation is claimed |
 
-- rotating-Earth ECEF equations and 6DOF rigid-body propagation;
-- a 13-state unscented Kalman filter with innovation gating;
-- 27 propagated UKF sigma-point trajectories;
-- 18 signed body-axis maneuver hypotheses at three causal event times;
-- interpolated first-passage side and gate probabilities;
-- a causal multimodal Transformer; and
-- validation-only temperature scaling with NLL and ECE acceptance gates.
+This distinction is intentional. A research system is stronger when it can say precisely **where the evidence stops**.
 
-## Possible Applications
+## System Architecture
 
-These are research directions, not claims of operational readiness.
+```mermaid
+flowchart LR
+    A[Noisy position + velocity observations] --> B[13-state robust UKF]
+    B --> C[6DOF physics propagation]
+    B --> D[Causal multimodal Transformer]
+    C --> E[Sigma-point + maneuver hypotheses]
+    E --> F[First-passage side / gate probabilities]
+    D --> G[Validation-only temperature calibration]
+    F --> H[Probabilistic research output]
+    G --> H
+    H --> I[Independent assurance]
+    I --> J{Accept or abstain}
+    J --> K[Evidence + reproducibility report]
+```
 
-- **NASA / spaceflight research:** launch-vehicle telemetry monitoring, reentry
-  trajectory assessment, spacecraft approach monitoring, range-safety research,
-  and identifying departures from predicted flight corridors.
-- **Hypersonic research:** estimating the next trajectory region when aerodynamic
-  forces, sensor noise, and maneuvers create uncertainty.
-- **Missile-warning research:** short-term trajectory classification from radar
-  observations. This is dual-use and requires authorized, safety-controlled,
-  legally compliant development and evaluation.
-- **Air and space traffic:** predicting whether an object will cross a protected
-  volume or safety boundary.
-- **Autonomous systems:** collision-avoidance research and dynamic keep-out zones
-  for aircraft, drones, or high-speed robots.
-- Aerospace trajectory monitoring.
-- Autonomous-vehicle interception or collision-avoidance research.
-- Drone and robotics safety-boundary prediction.
-- Sensor-fusion and tracking experiments.
-- Testing maneuver-detection and probabilistic forecasting methods.
+The current implementation remains largely self-contained in `alien_exit_cell_predictor_v6_3.py`; the assurance layer is intentionally independent so it can audit probability outputs without changing the underlying predictor.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries and the modularization path.
+
+## Core Method
+
+The system processes noisy simulated position and velocity observations and estimates short-horizon boundary-crossing behavior. The research implementation includes:
+
+- ECEF central gravity with Coriolis and centrifugal terms;
+- 13-state position/velocity/quaternion/angular-rate estimation;
+- covariance repair and innovation gating;
+- 27 UKF sigma-point rollouts;
+- first-passage probability over six local safety-volume faces;
+- transparent future-maneuver hypothesis mixtures;
+- causal interleaved feature/control Transformer tokens;
+- per-horizon temperature calibration fitted on validation data only; and
+- independent confidence/entropy/margin abstention plus split-conformal prediction sets.
+
+## Recorded Benchmark
+
+The versioned full benchmark contains 48 disjoint trajectory groups and 4,224 windows.
+
+| Horizon | Accuracy | Majority baseline | Balanced accuracy | Top-3 | ECE | Original gate |
+|---|---:|---:|---:|---:|---:|---|
+| 0.4 s | 26.6% | 20.9% | 26.7% | 72.3% | 3.7% | Pass |
+| 0.5 s | 24.0% | 18.5% | 24.4% | 70.3% | 6.1% | Pass |
+| 0.6 s | 16.7% | 17.7% | 17.3% | 65.8% | 13.1% | Fail |
+
+![Full benchmark release gates](benchmark_pass_thresholds.png)
+
+### Evidence audit
+
+The original aggregate table is not enough for an external-readiness claim. The recorded class coverage is:
+
+| Horizon | Train | Validation | Test |
+|---|---:|---:|---:|
+| 0.4 s | 11/16 | 4/16 | 4/16 |
+| 0.5 s | 8/16 | 4/16 | 4/16 |
+| 0.6 s | 5/16 | 4/16 | 4/16 |
+
+That limitation is now machine-checked.
+
+Run the audit:
+
+```bash
+python scripts/evidence_gate.py \
+  benchmark_v64_maneuver_calibrated_metrics.json \
+  --report evidence_report.json
+```
+
+To intentionally fail when the current evidence is not strong enough for external scientific-readiness criteria:
+
+```bash
+python scripts/evidence_gate.py \
+  benchmark_v64_maneuver_calibrated_metrics.json \
+  --fail-on scientific
+```
+
+The current recorded benchmark is expected to fail that second command. That is a feature, not a bug.
 
 ## Quick Start
 
-### Requirements
-
-- Python 3.10 or newer
-- macOS, Linux, or Windows
-- CPU execution is supported; a compatible GPU is optional
+### Install
 
 ```bash
 git clone https://github.com/sciencemaths-collab/hypersonic-trajectory-intelligence.git
 cd hypersonic-trajectory-intelligence
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-On Windows PowerShell, activate with:
+Windows PowerShell:
 
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-### Start the GUI
+### GUI
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-Open `http://127.0.0.1:8501` if Streamlit does not open it automatically.
-
-In the sidebar:
-
-1. Keep **Quick integration run** enabled for a fast end-to-end system check.
-2. Select **Run quick verification**.
-3. Use the timeline and lookahead controls to inspect boundary predictions.
-4. Turn off **Quick integration run** to expose **Run full benchmark**.
-5. Run the full benchmark when performance evidence is required.
-
-The full run trains and evaluates the model using trajectory-isolated data
-splits. It takes longer than the quick integration check.
-
-### Command-Line Run
+### Command line
 
 ```bash
 python alien_exit_cell_predictor_v6_3.py \
   --quick --no-gpu --no-viz --output-prefix demo
 ```
 
-Remove `--quick` for the full configuration.
+Remove `--quick` for the larger research configuration.
 
-## Reading the Console
+## Assurance API
 
-- **Prediction:** the most probable side and gate at the selected lookahead.
-- **First-passage mass:** probability assigned to the displayed first boundary
-  crossing by the sigma-point and maneuver mixture.
-- **Maneuver prior:** aggregate probability assigned to future maneuver
-  hypotheses over the selected horizon.
-- **Unresolved mass:** probability that did not cross the virtual volume within
-  the selected projection window.
-- **Accuracy:** must exceed the train-derived majority baseline.
-- **ECE:** expected calibration error; lower is better and the release limit is
-  10%.
+The assurance layer accepts a class-probability vector and can abstain when a distribution is too diffuse.
 
-## Tutorials
+```python
+import numpy as np
+from hti import assess_prediction
 
-The guided walkthrough in [docs/TUTORIAL.md](docs/TUTORIAL.md) covers installation,
-the GUI, CLI execution, benchmark interpretation, output artifacts, and common
-problems. New tutorials should be proposed through a GitHub issue or pull request.
+decision = assess_prediction(np.array([0.62, 0.18, 0.12, 0.08]))
+print(decision.accept, decision.reason)
+```
 
-## Validation
+For calibrated set-valued predictions, use `conformal_quantile` on a frozen calibration split and `conformal_prediction_set` on subsequent predictions. Final test data must not be used to tune assurance thresholds.
 
-The recorded full benchmark contains 48 disjoint trajectory groups and 4,224
-windows. Current results are:
+## Verification
 
-| Horizon | Accuracy | Majority baseline | ECE | Status |
-|---|---:|---:|---:|---|
-| 0.4 s | 26.6% | 20.9% | 3.7% | Pass |
-| 0.5 s | 24.0% | 18.5% | 6.1% | Pass |
-| 0.6 s | 16.7% | 17.7% | 13.1% | Fail |
+Run the unit suite:
 
-![Full benchmark release gates](benchmark_pass_thresholds.png)
+```bash
+python -m unittest -v test_v63.py test_assurance.py
+```
 
-Regenerate the standalone chart with:
+Run the existing fast stress probe:
+
+```bash
+python stress_test_fast.py --seeds 0,1,2 --traj 18 --mode diversity
+```
+
+Regenerate the benchmark chart:
 
 ```bash
 python plot_benchmark_thresholds.py
 ```
 
-Automated checks:
+The GitHub Actions workflow additionally compiles the assurance/evidence layer, lints new code, audits dependencies, and uploads the evidence audit as a CI artifact.
 
-```bash
-python -m unittest -v test_v63.py
-python stress_test_fast.py --seeds 0 --traj 6 --mode diversity
-```
+## Intended Research Uses
 
-## Known Limitations
+Appropriate proposal and collaboration directions include:
 
-- Training and validation use synthetic trajectories only.
-- Aerodynamics and upper-atmosphere behavior are simplified.
-- Quaternion uncertainty uses Euclidean UKF coordinates rather than a manifold
-  error-state formulation.
-- Future maneuvers use a transparent single-event hypothesis mixture rather than
-  a learned operational intent model.
-- The longest benchmark horizon currently fails the release criteria.
-- External sensor data, scenario-shift testing, and multi-seed performance
-  evidence are still required.
+- launch and reentry telemetry research;
+- spacecraft or high-speed vehicle corridor-departure monitoring;
+- range-safety and keep-out-volume research;
+- space-debris or air/space traffic boundary-crossing studies;
+- sensor-fusion and state-estimation experiments;
+- probabilistic short-horizon forecasting under uncertain dynamics;
+- autonomous collision-avoidance research where abstention and uncertainty are explicit; and
+- modeling-and-simulation methodology research.
 
-## Responsible Use
+This repository should not be used as the sole basis for navigation, flight control, targeting, interception, weapons control, or decisions affecting human safety.
 
-This software is dual-use. Users are responsible for complying with applicable
-laws, export controls, organizational policies, safety requirements, and data
-permissions. Do not use this prototype as the sole basis for decisions affecting
-human safety, navigation, targeting, interception, or operational control.
+## NASA-Oriented Research Readiness
 
-Research contributions that improve verification, uncertainty quantification,
-simulation realism, robustness, interpretability, and safety are encouraged.
+The documentation is structured so an evaluator can map the project to themes in NASA modeling/simulation, software-engineering, and software-assurance practice without claiming NASA compliance or certification.
+
+- [NASA research-readiness mapping](docs/NASA_RESEARCH_READINESS.md)
+- [Requirements traceability](docs/REQUIREMENTS_TRACEABILITY.md)
+- [External validation protocol](docs/EXTERNAL_VALIDATION_PROTOCOL.md)
+- [Validation report](VALIDATION_REPORT.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Proposal brief](docs/PROPOSAL_BRIEF.md)
+
+Official references used for the mapping include NASA-STD-7009B / NASA-HDBK-7009B, NPR 7150.2D, and NASA-STD-8739.8.
+
+## Known Scientific Gaps
+
+- Synthetic trajectories only.
+- Simplified aerodynamics and upper-atmosphere behavior.
+- Quaternion uncertainty is represented in Euclidean UKF coordinates instead of a manifold error-state formulation.
+- Current benchmark class coverage is incomplete.
+- Current versioned benchmark is single-seed.
+- The longest recorded horizon fails both the original accuracy-vs-baseline and ECE gates.
+- No independent external sensor or high-fidelity simulator validation is recorded.
+- No claim of operational reliability, certification, or flightworthiness is made.
+
+## Security and Responsible Use
+
+See [SECURITY.md](SECURITY.md). Do not commit credentials, private telemetry, controlled technical data, or sensitive operational datasets. Model and array loading paths should remain non-executable (`weights_only=True` for PyTorch state loading where applicable and `allow_pickle=False` for NumPy archives).
 
 ## Contributing
 
-Open an issue before substantial changes so the proposed experiment, evidence,
-and validation criteria can be discussed. Pull requests should include focused
-tests and should not describe experimental results as operational capability.
+Changes that affect scientific claims should include tests, an explicit hypothesis, frozen evaluation criteria, and updated evidence. Do not tune release thresholds after inspecting final test results.
 
 ## License
 
 Released under the [MIT License](LICENSE).
-
