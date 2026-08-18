@@ -26,7 +26,7 @@ The report supports independent technical review of the repository. It is not a 
 
 ## Independent assurance layer
 
-Release 0.7 adds `hti.assurance`, which is deliberately downstream from the predictor. It provides:
+Release 0.7 added `hti.assurance`, which is deliberately downstream from the predictor. It provides:
 
 - normalized predictive entropy;
 - top-1 confidence and top-1/top-2 margin;
@@ -34,6 +34,30 @@ Release 0.7 adds `hti.assurance`, which is deliberately downstream from the pred
 - split-conformal prediction sets fitted on a separate calibration set.
 
 This layer does not convert an invalid physical model into a valid one. It reduces the risk of presenting a diffuse probability vector as a confident research prediction.
+
+## HTI 0.8 structural/topological layer
+
+Release 0.8 adds `hti.topological_entropy`, an independent structural-motion and topology layer based on the supplied *Unified Topological-Entropy Trajectory Inference* construction.
+
+It adds implementation support for:
+
+- invertible nose/rear to center/body-axis geometry in 2D or 3D;
+- circular or directional smoothing;
+- body/travel slip angle;
+- signed turn rate and curvature;
+- local swept-area descriptors;
+- alternating-turn/zigzag diagnostics;
+- body-length/deformation rate;
+- transparent explanatory motion-mode evidence;
+- monotone non-negative topology/reachability path weighting;
+- 3D spherical safety-volume intersection penalties;
+- separate occupancy and terminal-cell probabilities;
+- entropy concentration and Bayesian credible-cell sets; and
+- backward conditioning of retained candidate paths for terminal-cell explanation.
+
+These additions are **architecture and implementation claims only** at this stage. The recorded 0.7 benchmark predates the 0.8 layer and is not evidence that the structural/topological features improve held-out prediction.
+
+The structural CLI may analyze existing HTI `*_online_trace.npz` artifacts, but those artifacts do not currently store attitude. In trace mode, velocity direction is therefore used only as an explicitly labeled orientation proxy. It must not be presented as independently observed body attitude.
 
 ## Causality checks
 
@@ -104,7 +128,7 @@ The current artifact is expected to fail this scientific tier. CI records the fa
 
 ## Automated verification inventory
 
-The existing core suite plus the new assurance suite cover:
+The core, assurance, and HTI 0.8 suites cover:
 
 - atmosphere positivity/monotonicity;
 - central-gravity inverse-square behavior;
@@ -119,18 +143,48 @@ The existing core suite plus the new assurance suite cover:
 - calibration behavior;
 - probability validation;
 - entropy and confidence-margin behavior;
-- abstention behavior; and
-- split-conformal set construction/coverage utilities.
+- abstention behavior;
+- split-conformal set construction/coverage utilities;
+- endpoint center/axis round-trip recovery;
+- centerline-to-endpoint bridge consistency;
+- circular angle-wrap invariance;
+- structural motion-mode normalization;
+- topology-weight monotonicity;
+- topology path-weight renormalization;
+- terminal distribution normalization;
+- cell-prior renormalization;
+- credible-cell mass behavior;
+- occupancy probability semantics;
+- forward/backward conditional consistency;
+- conditional mode/state explanation; and
+- 3D spherical safety-volume intersection counting.
 
-GitHub Actions runs these checks on Python 3.10, 3.11, and 3.12, plus linting and dependency auditing.
+GitHub Actions runs these checks on Python 3.10, 3.11, and 3.12, plus linting, dependency auditing, evidence-integrity checks, environment capture, and SHA-256 evidence manifests.
+
+## Required HTI 0.8 empirical experiment
+
+Before any statement that 0.8 improves predictive performance, use identical frozen event-level splits and seeds to compare at least:
+
+1. constant velocity;
+2. filter/direct extrapolation;
+3. physics-only;
+4. learned-only where scientifically fair;
+5. core HTI;
+6. core + structural features;
+7. core + topology; and
+8. combined HTI 0.8.
+
+The experiment must include component ablations for slip/orientation, curvature/turn rate, zigzag, swept area, deformation, and mode evidence; topology failure analysis; entropy-concentration versus empirical error/selective-risk deciles; 95% Bayesian credible-region coverage/size; conformal coverage/size; and robustness to endpoint noise, endpoint label swaps, missing frames, timing shifts, and abrupt turns.
+
+See [docs/TOPOLOGICAL_ENTROPY_VALIDATION.md](docs/TOPOLOGICAL_ENTROPY_VALIDATION.md).
 
 ## Remaining scientific work before a strong external validation claim
 
 - Generate multiple independent frozen benchmark seeds.
 - Improve scenario support so train, calibration/validation, and test sets cover materially more of the nominal class space while preserving trajectory isolation.
-- Add scenario-shift tests across sensor noise, atmospheric assumptions, vehicle parameters, maneuver regimes, and starting conditions.
-- Add sensitivity analysis and ablations that separate the contribution of physics rollout, UKF state estimation, Transformer features, maneuver mixture, and calibration.
-- Evaluate probability calibration, prediction-set coverage, and selective risk under distribution shift.
+- Run the frozen HTI 0.8 baseline/ablation experiment.
+- Add scenario-shift tests across sensor noise, endpoint quality, atmospheric assumptions, vehicle parameters, maneuver regimes, and starting conditions.
+- Evaluate probability calibration, credible-region coverage, conformal prediction-set coverage, and selective risk under distribution shift.
 - Validate against independent public civil telemetry or an independently configured high-fidelity simulator.
 - Replace the Euclidean quaternion covariance treatment with a manifold/error-state estimator if attitude uncertainty becomes a material part of the intended use.
 - Establish configuration-controlled benchmark manifests and independent review of the final evidence bundle.
@@ -139,4 +193,4 @@ See [docs/EXTERNAL_VALIDATION_PROTOCOL.md](docs/EXTERNAL_VALIDATION_PROTOCOL.md)
 
 ## Bottom line
 
-The current system is a credible **research prototype with a significantly improved assurance and evidence framework**. It is suitable for technical evaluation, collaboration discussions, and further validation work. It is not yet evidence-complete for operational, safety-critical, or certified use.
+The current system is a credible **research prototype with a stronger assurance, evidence, and structural/topological architecture**. HTI 0.8 is suitable for technical evaluation, collaboration discussions, and the next controlled validation phase. It is not yet evidence-complete for operational, safety-critical, certified, or externally validated use.
