@@ -28,6 +28,7 @@ DEFAULT_FILES = (
     "test_fusion_benchmarking.py",
     "test_phase3.py",
     "test_phase3_models.py",
+    "test_phase3_runner.py",
     "scripts/hti_08_evaluate_predictions.py",
     "scripts/hti_08_phase3_pilot.py",
     "scripts/hti_08_phase3_run_seed.py",
