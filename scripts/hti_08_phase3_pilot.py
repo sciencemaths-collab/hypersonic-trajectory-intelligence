@@ -2,8 +2,8 @@
 """Run a development-only coverage pilot before the five final HTI 0.8 seeds.
 
 The pilot seed must not be one of the frozen final-test seeds. It uses the
-candidate Phase 3 execution configuration to test event and class support
-without training models or inspecting any final-seed result.
+candidate execution configuration to test complete-event support on exactly the
+sample rows eligible for every frozen variant and valid at every horizon.
 """
 
 from __future__ import annotations
@@ -23,7 +23,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from alien_exit_cell_predictor_v6_3 import Config  # noqa: E402
-from hti.phase3 import coverage_report, generate_phase3_events, split_event_ids  # noqa: E402
+from hti.phase3 import generate_phase3_events, split_event_ids  # noqa: E402
+from hti.phase3_sampling import (  # noqa: E402
+    joint_valid_coverage_report,
+    minimum_source_frame,
+    trim_events,
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -99,11 +104,15 @@ def main() -> int:
         raise SystemExit("development pilot must not use a frozen final-test seed")
 
     cfg, event_target, minimum_windows = _configure(protocol, execution, int(args.seed))
-    events, generation = generate_phase3_events(
+    raw_events, generation = generate_phase3_events(
         cfg,
         event_target=event_target,
         seed=int(args.seed),
     )
+    min_frame = minimum_source_frame(execution)
+    events = trim_events(raw_events, min_source_frame=min_frame)
+    eligible_samples = int(sum(len(event.tokens) for event in events))
+
     split_cfg = protocol["split_policy"]
     event_ids = np.asarray([event.event_id for event in events], dtype=np.int64)
     splits = split_event_ids(
@@ -112,19 +121,17 @@ def main() -> int:
         train_fraction=float(split_cfg["train_fraction"]),
         validation_fraction=float(split_cfg["validation_fraction"]),
     )
-    coverage = coverage_report(events, splits, num_classes=cfg.box_N * cfg.box_N)
+    coverage = joint_valid_coverage_report(
+        events, splits, num_classes=cfg.box_N * cfg.box_N
+    )
     sample_counts = np.asarray([len(event.tokens) for event in events], dtype=int)
     minimum_coverage = float(protocol["claim_gates"]["minimum_test_class_coverage"])
-    coverage_values = [
-        float(value)
-        for split in coverage.values()
-        for value in split["class_coverage"]
-    ]
-    coverage_gate_pass = bool(min(coverage_values) >= minimum_coverage)
-    window_gate_pass = bool(generation.samples >= minimum_windows)
+    test_coverage = [float(value) for value in coverage["test"]["class_coverage"]]
+    coverage_gate_pass = bool(min(test_coverage) >= minimum_coverage)
+    window_gate_pass = bool(eligible_samples >= minimum_windows)
 
     report = {
-        "schema": "hti.phase3-development-pilot.v2",
+        "schema": "hti.phase3-development-pilot.v3",
         "development_only": True,
         "final_test_seed_used": False,
         "source_commit": _source_commit(),
@@ -134,13 +141,16 @@ def main() -> int:
         "requested_events": int(event_target),
         "generated_events": int(generation.generated_events),
         "generation_attempts": int(generation.attempts),
-        "samples": int(generation.samples),
+        "raw_generated_windows": int(generation.samples),
+        "minimum_joint_source_frame": int(min_frame),
+        "eligible_windows": eligible_samples,
+        "samples": eligible_samples,
         "minimum_windows": int(minimum_windows),
         "window_gate_pass": window_gate_pass,
-        "minimum_class_coverage": minimum_coverage,
+        "minimum_test_class_coverage": minimum_coverage,
         "coverage_gate_pass": coverage_gate_pass,
         "pilot_gate_pass": bool(coverage_gate_pass and window_gate_pass),
-        "samples_per_event": {
+        "samples_per_event_after_eligibility": {
             "min": int(sample_counts.min()),
             "median": float(np.median(sample_counts)),
             "max": int(sample_counts.max()),
@@ -169,8 +179,9 @@ def main() -> int:
         },
         "coverage": coverage,
         "scientific_note": (
-            "This development pilot may inform pre-final configuration design. It is not a final-test "
-            "performance result and uses no frozen final-test seed."
+            "This development pilot uses only seed 17, which is not a frozen final-test seed. "
+            "Coverage is measured after shared sample eligibility and all-horizon label validity, "
+            "matching the final comparison bundle."
         ),
     }
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
