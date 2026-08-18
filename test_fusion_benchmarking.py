@@ -1,3 +1,4 @@
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -18,8 +19,32 @@ from scripts.hti_08_evaluate_predictions import _self_test_bundle, evaluate
 
 
 class FusionBenchmarkingTests(unittest.TestCase):
+    protocol_path = Path("configs/hti_08_ablation_frozen.json")
+    execution_path = Path("configs/hti_08_phase3_execution_frozen.json")
+
     def frozen_config(self):
-        return json.loads(Path("configs/hti_08_ablation_frozen.json").read_text(encoding="utf-8"))
+        return json.loads(self.protocol_path.read_text(encoding="utf-8"))
+
+    def frozen_execution(self):
+        return json.loads(self.execution_path.read_text(encoding="utf-8"))
+
+    def execution_sha256(self):
+        return hashlib.sha256(self.execution_path.read_bytes()).hexdigest()
+
+    def self_test_bundle(self):
+        execution = self.frozen_execution()
+        return _self_test_bundle(
+            execution_config_sha256=self.execution_sha256(),
+            topology_strength=float(execution["topology_branch"]["cell_prior_strength"]),
+        )
+
+    def evaluate_bundle(self, bundle):
+        return evaluate(
+            bundle,
+            self.frozen_config(),
+            self.frozen_execution(),
+            execution_config_sha256=self.execution_sha256(),
+        )
 
     def test_log_pool_endpoints_recover_sources(self):
         core = np.array([[0.7, 0.2, 0.1]])
@@ -131,41 +156,72 @@ class FusionBenchmarkingTests(unittest.TestCase):
         self.assertEqual(result["favorable_direction"], 1.0)
         self.assertEqual(result["interval_supports_direction"], 1.0)
 
+    def test_self_test_bundle_satisfies_full_composition_contract(self):
+        report = self.evaluate_bundle(self.self_test_bundle())
+        contract = report["contract"]
+        self.assertTrue(contract["structural_fusion_reproducible"])
+        self.assertTrue(contract["topology_application_reproducible"])
+        self.assertTrue(contract["combined_reproducible"])
+
     def test_frozen_evaluator_rejects_missing_variant(self):
-        bundle = _self_test_bundle()
+        bundle = self.self_test_bundle()
         del bundle["probs__physics_only"]
         with self.assertRaises(ValueError):
-            evaluate(bundle, self.frozen_config())
+            self.evaluate_bundle(bundle)
 
     def test_frozen_evaluator_rejects_split_leakage(self):
-        bundle = _self_test_bundle()
+        bundle = self.self_test_bundle()
         bundle["validation_event_ids"] = np.array([100, 200, 201], dtype=int)
         with self.assertRaises(ValueError):
-            evaluate(bundle, self.frozen_config())
+            self.evaluate_bundle(bundle)
 
-    def test_frozen_evaluator_rejects_unreproducible_combined_predictions(self):
-        bundle = _self_test_bundle()
-        bundle["probs__hti_08_combined"] = bundle["probs__core_hti"].copy()
-        with self.assertRaisesRegex(ValueError, "does not reproduce"):
-            evaluate(bundle, self.frozen_config())
+    def test_frozen_evaluator_rejects_unreproducible_structural_fusion(self):
+        bundle = self.self_test_bundle()
+        bundle["probs__core_plus_structural"] = bundle["probs__core_hti"].copy()
+        with self.assertRaisesRegex(ValueError, "core_plus_structural"):
+            self.evaluate_bundle(bundle)
+
+    def test_frozen_evaluator_rejects_combined_without_topology(self):
+        bundle = self.self_test_bundle()
+        bundle["probs__hti_08_combined"] = bundle["probs__core_plus_structural"].copy()
+        with self.assertRaisesRegex(ValueError, "hti_08_combined"):
+            self.evaluate_bundle(bundle)
+
+    def test_frozen_evaluator_rejects_unreproducible_topology_variant(self):
+        bundle = self.self_test_bundle()
+        bundle["probs__core_plus_topology"] = bundle["probs__core_hti"].copy()
+        with self.assertRaisesRegex(ValueError, "core_plus_topology"):
+            self.evaluate_bundle(bundle)
 
     def test_frozen_evaluator_rejects_mismatched_cell_partition(self):
-        bundle = _self_test_bundle()
+        bundle = self.self_test_bundle()
         bundle["cell_ids__physics_only"] = bundle["cell_ids__physics_only"][::-1]
         with self.assertRaisesRegex(ValueError, "cell partitions"):
-            evaluate(bundle, self.frozen_config())
+            self.evaluate_bundle(bundle)
 
     def test_frozen_evaluator_requires_calibration_provenance(self):
-        bundle = _self_test_bundle()
+        bundle = self.self_test_bundle()
         del bundle["conformal_calibration_sha256__core_hti"]
         with self.assertRaisesRegex(ValueError, "conformal_calibration_sha256"):
-            evaluate(bundle, self.frozen_config())
+            self.evaluate_bundle(bundle)
 
     def test_frozen_evaluator_requires_topology_provenance(self):
-        bundle = _self_test_bundle()
+        bundle = self.self_test_bundle()
         del bundle["topology_coefficients_sha256"]
         with self.assertRaisesRegex(ValueError, "topology_coefficients_sha256"):
-            evaluate(bundle, self.frozen_config())
+            self.evaluate_bundle(bundle)
+
+    def test_frozen_evaluator_rejects_wrong_execution_config_digest(self):
+        bundle = self.self_test_bundle()
+        bundle["execution_config_sha256"] = np.array(["0" * 64])
+        with self.assertRaisesRegex(ValueError, "execution_config_sha256"):
+            self.evaluate_bundle(bundle)
+
+    def test_frozen_evaluator_requires_model_artifact_digests(self):
+        bundle = self.self_test_bundle()
+        del bundle["model_sha256__structural_branch"]
+        with self.assertRaisesRegex(ValueError, "model_sha256__structural_branch"):
+            self.evaluate_bundle(bundle)
 
 
 if __name__ == "__main__":
