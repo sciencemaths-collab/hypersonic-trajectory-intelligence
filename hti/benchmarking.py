@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from .assurance import normalized_entropy
+from .assurance import conformal_prediction_set, normalized_entropy
 from .topological_entropy import credible_cell_set
 
 EPS = np.finfo(float).tiny
@@ -25,6 +25,7 @@ class BenchmarkMetrics:
     ece: float
     credible_coverage: float
     credible_mean_size: float
+    credible_median_size: float
     mean_confidence: float
     mean_entropy_concentration: float
 
@@ -71,9 +72,11 @@ def topk_accuracy(probabilities: np.ndarray, labels: np.ndarray, k: int) -> floa
     return float(np.mean(np.any(top == y[:, None], axis=1)))
 
 
-def expected_calibration_error(
+def reliability_bins(
     probabilities: np.ndarray, labels: np.ndarray, *, bins: int = 15
-) -> float:
+) -> list[dict[str, float | int | None]]:
+    """Return top-label reliability-bin counts and empirical accuracy."""
+
     p, y = _validate(probabilities, labels)
     if bins < 2:
         raise ValueError("bins must be at least 2")
@@ -81,18 +84,42 @@ def expected_calibration_error(
     confidence = np.max(p, axis=1)
     correct = (pred == y).astype(float)
     edges = np.linspace(0.0, 1.0, bins + 1)
-    ece = 0.0
+    output: list[dict[str, float | int | None]] = []
     for index, (lo, hi) in enumerate(zip(edges[:-1], edges[1:], strict=True)):
         upper = confidence <= hi if index == bins - 1 else confidence < hi
         mask = (confidence >= lo) & upper
-        if np.any(mask):
-            ece += float(mask.mean()) * abs(float(correct[mask].mean()) - float(confidence[mask].mean()))
+        count = int(np.count_nonzero(mask))
+        output.append(
+            {
+                "bin": int(index),
+                "lower": float(lo),
+                "upper": float(hi),
+                "count": count,
+                "mean_confidence": float(confidence[mask].mean()) if count else None,
+                "accuracy": float(correct[mask].mean()) if count else None,
+            }
+        )
+    return output
+
+
+def expected_calibration_error(
+    probabilities: np.ndarray, labels: np.ndarray, *, bins: int = 15
+) -> float:
+    p, y = _validate(probabilities, labels)
+    records = reliability_bins(p, y, bins=bins)
+    ece = 0.0
+    for record in records:
+        count = int(record["count"])
+        if count:
+            ece += (count / len(y)) * abs(
+                float(record["accuracy"]) - float(record["mean_confidence"])
+            )
     return float(ece)
 
 
 def credible_region_stats(
     probabilities: np.ndarray, labels: np.ndarray, *, level: float = 0.95
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     p, y = _validate(probabilities, labels)
     if not 0.0 < level <= 1.0:
         raise ValueError("level must be in (0, 1]")
@@ -102,7 +129,35 @@ def credible_region_stats(
         selected = credible_cell_set(row, level)
         covered.append(int(label) in selected)
         sizes.append(len(selected))
-    return float(np.mean(covered)), float(np.mean(sizes))
+    return float(np.mean(covered)), float(np.mean(sizes)), float(np.median(sizes))
+
+
+def conformal_set_stats(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    qhat: float,
+) -> dict[str, float]:
+    """Evaluate a pre-calibrated split-conformal threshold on test predictions.
+
+    ``qhat`` must be fitted outside the final test set. This function only
+    evaluates its resulting sets and performs no calibration or tuning.
+    """
+
+    p, y = _validate(probabilities, labels)
+    if not np.isfinite(qhat) or not 0.0 <= float(qhat) <= 1.0:
+        raise ValueError("qhat must be a finite value in [0, 1]")
+    covered: list[bool] = []
+    sizes: list[int] = []
+    for row, label in zip(p, y, strict=True):
+        selected = conformal_prediction_set(row, float(qhat))
+        covered.append(int(label) in selected)
+        sizes.append(len(selected))
+    return {
+        "qhat": float(qhat),
+        "coverage": float(np.mean(covered)),
+        "mean_size": float(np.mean(sizes)),
+        "median_size": float(np.median(sizes)),
+    }
 
 
 def evaluate_probabilities(
@@ -115,7 +170,9 @@ def evaluate_probabilities(
     p, y = _validate(probabilities, labels)
     one_hot = np.eye(p.shape[1], dtype=float)[y]
     true_probability = p[np.arange(len(y)), y]
-    credible_coverage, credible_size = credible_region_stats(p, y, level=credible_level)
+    credible_coverage, credible_mean_size, credible_median_size = credible_region_stats(
+        p, y, level=credible_level
+    )
     entropy = np.asarray(normalized_entropy(p), dtype=float)
     return BenchmarkMetrics(
         samples=int(len(y)),
@@ -128,7 +185,8 @@ def evaluate_probabilities(
         brier=float(np.mean(np.sum((p - one_hot) ** 2, axis=1))),
         ece=expected_calibration_error(p, y, bins=ece_bins),
         credible_coverage=credible_coverage,
-        credible_mean_size=credible_size,
+        credible_mean_size=credible_mean_size,
+        credible_median_size=credible_median_size,
         mean_confidence=float(np.mean(np.max(p, axis=1))),
         mean_entropy_concentration=float(np.mean(1.0 - entropy)),
     )
@@ -172,10 +230,13 @@ def event_bootstrap_delta(
     seed: int = 20260818,
     lower_is_better: bool = True,
 ) -> dict[str, float]:
-    """Paired event-level bootstrap interval for a per-sample metric contribution.
+    """Paired complete-event bootstrap interval for a per-sample metric contribution.
 
     Returned ``delta`` is candidate minus baseline. Negative is favorable when
-    ``lower_is_better`` is true; positive is favorable otherwise.
+    ``lower_is_better`` is true; positive is favorable otherwise. Complete
+    events are sampled with replacement, retaining all windows in each sampled
+    event, so the reported estimand remains sample-weighted while accounting for
+    within-event dependence.
     """
 
     candidate = np.asarray(candidate_values, dtype=float).reshape(-1)
@@ -202,11 +263,13 @@ def event_bootstrap_delta(
     observed = float(np.mean(candidate - baseline))
     lo, hi = np.quantile(deltas, [0.025, 0.975])
     favorable = observed < 0.0 if lower_is_better else observed > 0.0
+    interval_supports = hi < 0.0 if lower_is_better else lo > 0.0
     return {
         "delta": observed,
         "ci95_low": float(lo),
         "ci95_high": float(hi),
         "favorable_direction": float(1.0 if favorable else 0.0),
+        "interval_supports_direction": float(1.0 if interval_supports else 0.0),
     }
 
 
