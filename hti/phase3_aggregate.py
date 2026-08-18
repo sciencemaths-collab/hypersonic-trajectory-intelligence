@@ -6,7 +6,6 @@ from collections.abc import Sequence
 
 import numpy as np
 
-
 METRIC_NAMES = (
     "class_coverage",
     "accuracy_top1",
