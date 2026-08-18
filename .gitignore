@@ -20,6 +20,8 @@ htmlcov/
 *_metrics.json
 stress_fast.json
 evidence_report.json
+evidence_manifest.json
+ci_environment.txt
 
 # Keep the versioned benchmark evidence.
 !benchmark_v64_maneuver_calibrated_metrics.json
