@@ -30,7 +30,7 @@ The project is not affiliated with, endorsed by, or developed on behalf of NASA,
 - Added Bayesian backward conditioning for explaining which stored paths and modes support a selected terminal cell.
 - Added `scripts/hti_structural_analysis.py` for observed endpoint CSVs or existing HTI trace artifacts.
 - Added a dedicated 0.8 architecture document and a falsification/validation protocol.
-- Added 13 new unit tests for the source-derived mathematical invariants and structural behavior.
+- Added a dedicated unit-test module covering the source-derived mathematical invariants and structural behavior.
 - Expanded CI and evidence manifests to cover the 0.8 layer.
 
 ## Current Readiness
