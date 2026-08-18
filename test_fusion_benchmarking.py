@@ -4,9 +4,11 @@ import numpy as np
 
 from hti.benchmarking import (
     assert_disjoint_event_splits,
+    conformal_set_stats,
     evaluate_probabilities,
     event_bootstrap_delta,
     nll_contributions,
+    reliability_bins,
     selective_risk_curve,
 )
 from hti.fusion import apply_cell_prior, log_linear_pool, select_structural_weight
@@ -65,6 +67,26 @@ class FusionBenchmarkingTests(unittest.TestCase):
         self.assertEqual(metrics.class_coverage, 1.0)
         self.assertLess(metrics.nll, 0.03)
         self.assertEqual(metrics.credible_coverage, 1.0)
+        self.assertEqual(metrics.credible_median_size, 1.0)
+
+    def test_reliability_bins_account_for_every_sample(self):
+        probabilities = np.array(
+            [[0.90, 0.10], [0.80, 0.20], [0.55, 0.45], [0.40, 0.60]]
+        )
+        labels = np.array([0, 0, 1, 1])
+        bins = reliability_bins(probabilities, labels, bins=5)
+        self.assertEqual(sum(int(record["count"]) for record in bins), len(labels))
+        self.assertEqual(len(bins), 5)
+
+    def test_precalibrated_conformal_stats_report_coverage_and_size(self):
+        probabilities = np.array(
+            [[0.80, 0.20], [0.15, 0.85], [0.70, 0.30], [0.20, 0.80]]
+        )
+        labels = np.array([0, 1, 0, 1])
+        stats = conformal_set_stats(probabilities, labels, qhat=0.40)
+        self.assertEqual(stats["coverage"], 1.0)
+        self.assertEqual(stats["mean_size"], 1.0)
+        self.assertEqual(stats["median_size"], 1.0)
 
     def test_selective_risk_prefers_concentrated_correct_forecasts(self):
         probabilities = np.array(
@@ -101,6 +123,7 @@ class FusionBenchmarkingTests(unittest.TestCase):
         self.assertLess(result["delta"], 0.0)
         self.assertLess(result["ci95_high"], 0.0)
         self.assertEqual(result["favorable_direction"], 1.0)
+        self.assertEqual(result["interval_supports_direction"], 1.0)
 
 
 if __name__ == "__main__":
