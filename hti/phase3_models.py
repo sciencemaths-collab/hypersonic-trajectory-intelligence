@@ -81,7 +81,7 @@ class RidgeProbabilisticClassifier:
         *,
         classes: int,
         ridge_lambda: float,
-    ) -> "RidgeProbabilisticClassifier":
+    ) -> RidgeProbabilisticClassifier:
         x = _feature_matrix(features)
         y = _labels(labels, classes=classes)
         if len(x) != len(y):

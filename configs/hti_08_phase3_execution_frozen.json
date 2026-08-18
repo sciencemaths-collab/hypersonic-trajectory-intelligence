@@ -1,8 +1,8 @@
 {
   "schema": "hti.phase3-execution.v0.8",
   "status": "frozen-before-final-test",
-  "development_revision": 2,
-  "development_change_rationale": "Development seed 17 at revision 1 produced 7/16 classes at the 0.6 s test horizon, below the predeclared 50% class-coverage gate. No final-test seed was inspected. Revision 2 increases only complete-event count/sample support from 72/3200 to 96/7000; motion and grid parameters remain unchanged. Concrete baseline, learned, structural, topology, fusion, and calibration definitions are frozen before any final-test seed is generated.",
+  "development_revision": 3,
+  "development_change_rationale": "Development seed 17 showed that raw sample count alone does not diagnose class-support failures. No final-test seed was inspected. Revision 3 leaves motion, grid, model, and final-test settings unchanged and adds a calculation-first audit of pooled generator support, per-event diversity, class prevalence across events, and complete-event split stability before any training is authorized.",
   "protocol": "configs/hti_08_ablation_frozen.json",
   "scope": "synthetic non-sensitive civil aerospace internal validation",
   "trajectory_generation": {
@@ -18,6 +18,14 @@
     "box_cross_scale": 0.012,
     "box_cross_min_m": 18.0,
     "box_cross_max_m": 160.0
+  },
+  "coverage_diagnostics": {
+    "training_allowed": false,
+    "prediction_scores_allowed": false,
+    "split_stability_trials": 32,
+    "report_pooled_grid_support": true,
+    "report_per_event_class_diversity": true,
+    "report_class_event_prevalence": true
   },
   "constant_velocity": {
     "state_source": "current_ukf_position_velocity",

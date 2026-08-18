@@ -25,6 +25,7 @@ if str(REPO_ROOT) not in sys.path:
 from alien_exit_cell_predictor_v6_3 import Config  # noqa: E402
 from hti.phase3 import generate_phase3_events, split_event_ids  # noqa: E402
 from hti.phase3_sampling import (  # noqa: E402
+    development_support_audit,
     joint_valid_coverage_report,
     minimum_source_frame,
     trim_events,
@@ -126,6 +127,15 @@ def main() -> int:
     )
     sample_counts = np.asarray([len(event.tokens) for event in events], dtype=int)
     minimum_coverage = float(protocol["claim_gates"]["minimum_test_class_coverage"])
+    diagnostic_cfg = execution.get("coverage_diagnostics", {})
+    support_audit = development_support_audit(
+        events,
+        num_classes=cfg.box_N * cfg.box_N,
+        train_fraction=float(split_cfg["train_fraction"]),
+        validation_fraction=float(split_cfg["validation_fraction"]),
+        minimum_coverage=minimum_coverage,
+        split_trials=int(diagnostic_cfg.get("split_stability_trials", 32)),
+    )
     test_coverage = [float(value) for value in coverage["test"]["class_coverage"]]
     coverage_gate_pass = bool(min(test_coverage) >= minimum_coverage)
     window_gate_pass = bool(eligible_samples >= minimum_windows)
@@ -178,6 +188,7 @@ def main() -> int:
             name: [int(value) for value in ids] for name, ids in splits.items()
         },
         "coverage": coverage,
+        "calculation_first_support_audit": support_audit,
         "scientific_note": (
             "This development pilot uses only seed 17, which is not a frozen final-test seed. "
             "Coverage is measured after shared sample eligibility and all-horizon label validity, "

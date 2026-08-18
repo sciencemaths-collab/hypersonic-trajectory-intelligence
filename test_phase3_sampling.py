@@ -4,6 +4,7 @@ import numpy as np
 
 from hti.phase3 import Phase3Event
 from hti.phase3_sampling import (
+    development_support_audit,
     joint_valid_coverage_report,
     minimum_source_frame,
     trim_event,
@@ -60,6 +61,39 @@ class Phase3SamplingTests(unittest.TestCase):
         report = joint_valid_coverage_report([event], splits, num_classes=4)
         self.assertEqual(report["test"]["samples"], 2)
         self.assertEqual(report["test"]["unique_classes"], [2, 2, 2])
+
+    def test_support_audit_separates_generator_support_from_split_stability(self):
+        events = []
+        for event_id in range(12):
+            event = _event()
+            labels = np.full((5, 3), event_id % 4, dtype=int)
+            events.append(
+                Phase3Event(
+                    event_id=17_000_000 + event_id,
+                    tokens=event.tokens,
+                    labels=labels,
+                    next_features=event.next_features,
+                    source_frames=event.source_frames,
+                    estimated_states=event.estimated_states,
+                    covariances=event.covariances,
+                    truth_states=event.truth_states,
+                    measurements=event.measurements,
+                    controls=event.controls,
+                )
+            )
+        audit = development_support_audit(
+            events,
+            num_classes=4,
+            train_fraction=0.5,
+            validation_fraction=0.25,
+            minimum_coverage=0.5,
+            split_trials=8,
+        )
+        self.assertFalse(audit["model_training_used"])
+        self.assertFalse(audit["prediction_scores_used"])
+        self.assertEqual(audit["pooled_unique_classes"], [4, 4, 4])
+        self.assertEqual(audit["pooled_grid_coverage"], [1.0, 1.0, 1.0])
+        self.assertEqual(audit["split_stability"]["trials"], 8)
 
 
 if __name__ == "__main__":
