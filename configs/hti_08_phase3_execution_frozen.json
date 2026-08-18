@@ -2,7 +2,7 @@
   "schema": "hti.phase3-execution.v0.8",
   "status": "frozen-before-final-test",
   "development_revision": 2,
-  "development_change_rationale": "Development seed 17 at revision 1 produced 7/16 classes at the 0.6 s test horizon, below the predeclared 50% class-coverage gate. No final-test seed was inspected. Revision 2 changes only complete-event count/sample support; motion, grid, model, fusion, topology, calibration, and claim gates are unchanged.",
+  "development_change_rationale": "Development seed 17 at revision 1 produced 7/16 classes at the 0.6 s test horizon, below the predeclared 50% class-coverage gate. No final-test seed was inspected. Revision 2 increases only complete-event count/sample support from 72/3200 to 96/7000; motion and grid parameters remain unchanged. Concrete baseline, learned, structural, topology, fusion, and calibration definitions are frozen before any final-test seed is generated.",
   "protocol": "configs/hti_08_ablation_frozen.json",
   "scope": "synthetic non-sensitive civil aerospace internal validation",
   "trajectory_generation": {
@@ -19,7 +19,37 @@
     "box_cross_min_m": 18.0,
     "box_cross_max_m": 160.0
   },
+  "constant_velocity": {
+    "state_source": "current_ukf_position_velocity",
+    "future_model": "constant_velocity",
+    "probability_smoothing": 0.02,
+    "unresolved_policy": "uniform_mass"
+  },
+  "filter_direct": {
+    "state_source": "current_ukf_mean_state",
+    "future_model": "nominal_6dof_mean_rollout_current_control_once_then_zero",
+    "probability_smoothing": 0.02,
+    "unresolved_policy": "uniform_mass"
+  },
+  "physics_branch": {
+    "state_source": "current_ukf_mean_and_covariance",
+    "future_model": "positive_weight_sigma_rollout_plus_predeclared_one_impulse_maneuver_bank",
+    "maneuver_mixture_probability_source": "trajectory_generation.maneuver_prob",
+    "one_hot_smoothing": 0.02,
+    "unresolved_policy": "uniform_mass"
+  },
+  "learned_only": {
+    "kind": "ridge_multiclass_measurement_history",
+    "input": "causal_noisy_position_velocity_history_only",
+    "history_points": 10,
+    "history_stride_frames": 2,
+    "ridge_lambda": 0.05,
+    "temperature_candidates": [0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 2.0],
+    "normalization": "train_split_only",
+    "temperature_selection": "validation_only"
+  },
   "transformer": {
+    "role": "core_hti",
     "epochs": 10,
     "batch_size": 128,
     "d_model": 80,
@@ -29,33 +59,55 @@
     "dropout": 0.10,
     "learning_rate": 0.0002,
     "weight_decay": 0.0001,
-    "label_smoothing": 0.05
+    "label_smoothing": 0.05,
+    "normalization": "train_split_only",
+    "temperature_selection": "validation_only"
   },
   "structural_branch": {
+    "kind": "ridge_multiclass_two_point_structure",
     "history_points": 8,
     "body_length_m": 20.0,
+    "endpoint_noise_std_m": 1.0,
+    "orientation_source": "synthetic_noisy_nose_rear_from_truth_attitude",
+    "center_source": "synthetic_truth_position_with_independent_endpoint_noise",
+    "feature_set": [
+      "speed",
+      "slip_angle",
+      "turn_rate",
+      "curvature",
+      "swept_area",
+      "zigzag_score",
+      "zigzag_bias",
+      "body_length_rate",
+      "body_direction_xyz",
+      "travel_direction_xyz",
+      "five_mode_probabilities"
+    ],
     "ridge_lambda": 0.05,
-    "temperature_candidates": [0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 2.0]
-  },
-  "physics_branch": {
-    "one_hot_smoothing": 0.02,
-    "unresolved_policy": "uniform_mass"
+    "temperature_candidates": [0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 2.0],
+    "normalization": "train_split_only",
+    "temperature_selection": "validation_only"
   },
   "topology_branch": {
     "kind": "history_consistency_sigma_path_reweighting",
+    "history_direction_source": "two_point_structural_travel_direction",
+    "path_distance": "normalized_angle_between_history_direction_and_candidate_net_displacement_divided_by_pi",
     "history_angle_gamma": 1.5,
     "cell_prior_strength": 0.35,
     "cell_prior_floor": 0.001,
-    "true_support_suppression_delta": 0.02
+    "true_support_suppression_delta": 0.02,
+    "true_path_failure_definition": "one_minus_history_consistency_weight_exceeds_true_support_suppression_delta"
   },
   "fusion": {
     "candidate_weights_from_protocol": true,
     "selection_data": "validation_only",
-    "selection_metric": "negative_log_likelihood"
+    "selection_metric": "negative_log_likelihood",
+    "composition_order": "core_plus_raw_structural_then_frozen_topology_prior"
   },
   "conformal": {
     "alpha": 0.05,
-    "calibration_data": "validation_only"
+    "calibration_data": "validation_only",
+    "score": "one_minus_true_class_probability"
   },
   "execution": {
     "device": "cpu",
