@@ -12,8 +12,8 @@ from .assurance import (
 from .benchmarking import (
     BenchmarkMetrics,
     assert_disjoint_event_splits,
-    event_bootstrap_delta,
     evaluate_probabilities,
+    event_bootstrap_delta,
     nll_contributions,
     selective_risk_curve,
     topk_accuracy,
