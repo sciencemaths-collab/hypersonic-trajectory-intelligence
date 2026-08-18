@@ -21,6 +21,8 @@ htmlcov/
 stress_fast.json
 evidence_report.json
 evidence_manifest.json
+hti08_ablation_report.json
+hti08_ablation_smoke_report.json
 ci_environment.txt
 
 # Keep the versioned benchmark evidence.
